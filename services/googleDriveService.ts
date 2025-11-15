@@ -1,7 +1,6 @@
-
 import { FileObject } from '../types.ts';
+import { googleApiService } from './googleApiService.ts';
 
-// See: https://developers.google.com/drive/api/guides/api-specific-auth
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
 const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
 
@@ -9,48 +8,50 @@ let tokenClient: any = null;
 
 export const googleDriveService = {
   /**
-   * Initializes the GAPI client and GSI token client.
-   * This is called when the user clicks "Connect".
+   * Initializes the GAPI client and GSI token client after ensuring scripts are loaded.
    */
   connect: async (apiKey: string, clientId: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-        // Poll for gapi and gsi to be loaded by the scripts in index.html
-        const checkGapiAndGsi = () => {
-            if (window.gapi && window.google) {
-                // Load the client library
-                window.gapi.load('client', () => {
-                    // Initialize the GAPI client
-                    window.gapi.client.init({
-                        apiKey: apiKey,
-                        discoveryDocs: [DISCOVERY_DOC],
-                    }).then(() => {
-                        // Initialize the GSI token client
-                        tokenClient = window.google.accounts.oauth2.initTokenClient({
-                            client_id: clientId,
-                            scope: SCOPES,
-                            callback: (tokenResponse: any) => {
-                                if (tokenResponse && tokenResponse.access_token) {
-                                    console.log("Successfully connected and authenticated with Google Drive.");
-                                    resolve();
-                                } else {
-                                    // This can happen if the user closes the popup
-                                    reject(new Error("Failed to acquire access token. The user may have cancelled the action."));
-                                }
-                            },
-                        });
-                        // Prompt user to sign in immediately after initialization
-                        googleDriveService.signIn();
-                    }).catch((err: any) => {
-                        console.error("Error initializing GAPI client", err);
-                        reject(new Error("Error initializing GAPI client. Check your API Key."));
-                    });
-                });
-            } else {
-                setTimeout(checkGapiAndGsi, 100); // Wait and retry
-            }
-        };
-        checkGapiAndGsi();
-    });
+    try {
+      // First, ensure the Google API scripts are loaded and ready.
+      await googleApiService.loadScripts();
+
+      // Now, proceed with initialization.
+      await new Promise<void>((resolve, reject) => {
+        // Load the GAPI client library
+        window.gapi.load('client', async () => {
+          try {
+            await window.gapi.client.init({
+              apiKey: apiKey,
+              discoveryDocs: [DISCOVERY_DOC],
+            });
+            
+            tokenClient = window.google.accounts.oauth2.initTokenClient({
+              client_id: clientId,
+              scope: SCOPES,
+              callback: (tokenResponse: any) => {
+                if (tokenResponse && tokenResponse.access_token) {
+                  console.log("Successfully connected and authenticated with Google Drive.");
+                  resolve();
+                } else {
+                  reject(new Error("Failed to acquire access token. The user may have cancelled the action."));
+                }
+              },
+            });
+
+            // Prompt user to sign in immediately after initialization
+            googleDriveService.signIn();
+
+          } catch (err) {
+            console.error("Error initializing GAPI client", err);
+            reject(new Error("Error initializing GAPI client. Check your API Key. It might be invalid or restricted."));
+          }
+        });
+      });
+    } catch (error) {
+        // This will catch errors from loadScripts or the initialization promise.
+        console.error("Connection process failed:", error);
+        throw error;
+    }
   },
 
   /**
@@ -60,7 +61,6 @@ export const googleDriveService = {
     if (!tokenClient) {
         throw new Error("GSI token client not initialized. Call connect() first.");
     }
-    // Prompt user to select an account and grant access.
     tokenClient.requestAccessToken({prompt: 'consent'});
   },
 
@@ -109,19 +109,18 @@ export const googleDriveService = {
         } else if (file.mimeType === 'application/vnd.google-apps.document') {
           const exportResponse = await window.gapi.client.drive.files.export({ fileId: file.id, mimeType: 'text/plain' });
           content = exportResponse.body;
-          fileType = 'pdf'; // Treat as a text-based doc
+          fileType = 'pdf'; 
         } else {
-          // For PDF and plain text, get content directly
           const fileResponse = await window.gapi.client.drive.files.get({ fileId: file.id, alt: 'media' });
-          content = fileResponse.body; // Note: For PDFs, this will be garbled text without a proper parser.
-          fileType = file.mimeType === 'application/pdf' ? 'pdf' : 'sheet'; // simplistic mapping
+          content = fileResponse.body; 
+          fileType = file.mimeType === 'application/pdf' ? 'pdf' : 'sheet';
         }
 
         return {
           id: file.id,
           name: file.name,
           type: fileType,
-          content: content.substring(0, 200000), // Truncate content to avoid being too large
+          content: content.substring(0, 200000), 
         };
       } catch (err: any) {
         console.error(`Failed to fetch content for ${file.name}:`, err);

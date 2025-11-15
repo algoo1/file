@@ -1,6 +1,6 @@
-
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Client } from './types.ts';
+import { googleApiService } from './services/googleApiService.ts';
 import { googleDriveService } from './services/googleDriveService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
 import ClientManager from './components/ClientManager.tsx';
@@ -8,22 +8,36 @@ import FileManager from './components/FileManager.tsx';
 import SearchInterface from './components/SearchInterface.tsx';
 import ApiDetails from './components/ApiDetails.tsx';
 import Settings from './components/Settings.tsx';
+import GoogleAuthModal from './components/GoogleAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
 
 const App: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   
-  // New global state
   const [fileSearchApiKey, setFileSearchApiKey] = useState<string>('');
   const [googleApiKey, setGoogleApiKey] = useState<string>('');
   const [googleClientId, setGoogleClientId] = useState<string>('');
   const [googleClientSecret, setGoogleClientSecret] = useState<string>('');
+  
   const [isGoogleDriveConnected, setIsGoogleDriveConnected] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [apiScriptsLoaded, setApiScriptsLoaded] = useState(false);
   
   const pollingIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    googleApiService.loadScripts().then(() => {
+        setApiScriptsLoaded(true);
+        console.log("Google API scripts loaded successfully.");
+    }).catch(error => {
+        console.error("Failed to load Google API scripts:", error);
+        alert("Could not load necessary Google scripts. Please check your internet connection and refresh the page.");
+    });
+  }, []);
 
   const handleConnectGoogleDrive = useCallback(async () => {
     if (!googleApiKey || !googleClientId) {
@@ -32,7 +46,8 @@ const App: React.FC = () => {
     }
     try {
       await googleDriveService.connect(googleApiKey, googleClientId);
-      setIsGoogleDriveConnected(true); // Set connected on successful auth
+      setIsGoogleDriveConnected(true);
+      setIsAuthModalOpen(false); // Close modal on success
     } catch (error) {
       console.error("Google Drive connection failed:", error);
       alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
@@ -64,9 +79,7 @@ const App: React.FC = () => {
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
 
-  // The main sync and polling logic
   useEffect(() => {
-    // Stop any existing polling
     if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
     }
@@ -82,10 +95,7 @@ const App: React.FC = () => {
         console.log(`Checking for updates for ${selectedClient.name}...`);
         
         try {
-            // 1. Fetch current files from Google Drive
             const driveFiles = await googleDriveService.getFilesFromFolder(selectedClient.googleDriveFolderUrl);
-
-            // 2. Check if there's a change (simple check by content and count)
             const currentContent = selectedClient.files.map(f => f.id + f.content).join('');
             const newContent = driveFiles.map(f => f.id + f.content).join('');
 
@@ -97,10 +107,8 @@ const App: React.FC = () => {
                         : c
                 ));
                 
-                // 3. Sync with File Search Service (delete and re-upload)
                 const indexedFiles = await fileSearchService.syncClientFiles(selectedClient, driveFiles, fileSearchApiKey);
                 
-                // 4. Update local state with indexed files
                 setClients(prev => prev.map(c => c.id === selectedClient.id ? { ...c, files: indexedFiles } : c));
                 console.log("Sync successful.");
             } else {
@@ -114,13 +122,11 @@ const App: React.FC = () => {
         }
     };
     
-    // Start polling if a client with a folder is selected
     if (selectedClient && selectedClient.googleDriveFolderUrl) {
-        syncAndPoll(); // Initial sync
+        syncAndPoll();
         pollingIntervalRef.current = window.setInterval(syncAndPoll, 5000);
     }
 
-    // Cleanup on component unmount or when dependencies change
     return () => {
         if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current);
@@ -147,14 +153,8 @@ const App: React.FC = () => {
           <Settings 
             fileSearchApiKey={fileSearchApiKey}
             setFileSearchApiKey={setFileSearchApiKey}
-            googleApiKey={googleApiKey}
-            setGoogleApiKey={setGoogleApiKey}
-            googleClientId={googleClientId}
-            setGoogleClientId={setGoogleClientId}
-            googleClientSecret={googleClientSecret}
-            setGoogleClientSecret={setGoogleClientSecret}
             isGoogleDriveConnected={isGoogleDriveConnected}
-            onConnectGoogleDrive={handleConnectGoogleDrive}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
           />
           <ClientManager 
             clients={clients} 
@@ -188,6 +188,20 @@ const App: React.FC = () => {
             )}
         </section>
       </main>
+      {isAuthModalOpen && (
+        <GoogleAuthModal 
+            onClose={() => setIsAuthModalOpen(false)}
+            googleApiKey={googleApiKey}
+            setGoogleApiKey={setGoogleApiKey}
+            googleClientId={googleClientId}
+            setGoogleClientId={setGoogleClientId}
+            googleClientSecret={googleClientSecret}
+            setGoogleClientSecret={setGoogleClientSecret}
+            onConnectGoogleDrive={handleConnectGoogleDrive}
+            isGoogleDriveConnected={isGoogleDriveConnected}
+            apiScriptsLoaded={apiScriptsLoaded}
+        />
+      )}
     </div>
   );
 };
