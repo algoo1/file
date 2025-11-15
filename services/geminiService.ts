@@ -1,18 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Ensure the API key is available from environment variables
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 /**
  * Summarizes the content of a document to make it searchable.
  * @param content The text content of the file.
  * @returns A promise that resolves to a summary of the content.
  */
 export async function summarizeContent(content: string): Promise<string> {
+  // Initialize the GoogleGenAI client here to prevent app crash on load.
+  // This defers the requirement for process.env.API_KEY until this function is called.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
   try {
     const prompt = `Summarize the following document content to create a searchable index. Focus on key entities, topics, main points, and any structured data present. The summary should be concise yet comprehensive.
 
