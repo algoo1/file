@@ -1,0 +1,5 @@
+{
+  "name": "Drive Data Sync & Search API",
+  "description": "An application to sync data from Google Drive files (PDFs, Sheets), index it using AI, and generate a dedicated search API for each client. This tool allows users to manage client-specific data, keep it updated, and provide a queryable endpoint for integration with services like n8n.",
+  "requestFramePermissions": []
+}
