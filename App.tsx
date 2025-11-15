@@ -16,6 +16,8 @@ const App: React.FC = () => {
   
   // New global state
   const [fileSearchApiKey, setFileSearchApiKey] = useState<string>('');
+  const [googleApiKey, setGoogleApiKey] = useState<string>('');
+  const [googleClientId, setGoogleClientId] = useState<string>('');
   const [isGoogleDriveConnected, setIsGoogleDriveConnected] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -23,9 +25,19 @@ const App: React.FC = () => {
   const pollingIntervalRef = useRef<number | null>(null);
 
   const handleConnectGoogleDrive = useCallback(async () => {
-    const success = await googleDriveService.connect();
-    setIsGoogleDriveConnected(success);
-  }, []);
+    if (!googleApiKey || !googleClientId) {
+      alert("Please provide both Google API Key and Client ID in settings.");
+      return;
+    }
+    try {
+      await googleDriveService.connect(googleApiKey, googleClientId);
+      setIsGoogleDriveConnected(true); // Set connected on successful auth
+    } catch (error) {
+      console.error("Google Drive connection failed:", error);
+      alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
+      setIsGoogleDriveConnected(false);
+    }
+  }, [googleApiKey, googleClientId]);
 
   const handleAddClient = useCallback((name: string) => {
     if (name.trim()) {
@@ -134,6 +146,10 @@ const App: React.FC = () => {
           <Settings 
             fileSearchApiKey={fileSearchApiKey}
             setFileSearchApiKey={setFileSearchApiKey}
+            googleApiKey={googleApiKey}
+            setGoogleApiKey={setGoogleApiKey}
+            googleClientId={googleClientId}
+            setGoogleClientId={setGoogleClientId}
             isGoogleDriveConnected={isGoogleDriveConnected}
             onConnectGoogleDrive={handleConnectGoogleDrive}
           />

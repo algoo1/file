@@ -6,6 +6,10 @@ import { DriveIcon } from './icons/DriveIcon.tsx';
 interface SettingsProps {
   fileSearchApiKey: string;
   setFileSearchApiKey: (key: string) => void;
+  googleApiKey: string;
+  setGoogleApiKey: (key: string) => void;
+  googleClientId: string;
+  setGoogleClientId: (id: string) => void;
   isGoogleDriveConnected: boolean;
   onConnectGoogleDrive: () => void;
 }
@@ -13,6 +17,10 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({
   fileSearchApiKey,
   setFileSearchApiKey,
+  googleApiKey,
+  setGoogleApiKey,
+  googleClientId,
+  setGoogleClientId,
   isGoogleDriveConnected,
   onConnectGoogleDrive,
 }) => {
@@ -33,6 +41,32 @@ const Settings: React.FC<SettingsProps> = ({
             value={fileSearchApiKey}
             onChange={(e) => setFileSearchApiKey(e.target.value)}
             placeholder="Enter your API Key"
+            className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+          />
+        </div>
+         <div>
+          <label htmlFor="googleApiKey" className="block text-sm font-medium text-gray-400 mb-1">
+            Google API Key
+          </label>
+          <input
+            id="googleApiKey"
+            type="password"
+            value={googleApiKey}
+            onChange={(e) => setGoogleApiKey(e.target.value)}
+            placeholder="Enter your Google API Key"
+            className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+          />
+        </div>
+        <div>
+          <label htmlFor="googleClientId" className="block text-sm font-medium text-gray-400 mb-1">
+            Google Client ID
+          </label>
+          <input
+            id="googleClientId"
+            type="password"
+            value={googleClientId}
+            onChange={(e) => setGoogleClientId(e.target.value)}
+            placeholder="Enter your Google Client ID"
             className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
           />
         </div>

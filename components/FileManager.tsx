@@ -56,9 +56,6 @@ const FileManager: React.FC<FileManagerProps> = ({ client, isGoogleDriveConnecte
                     Link
                 </button>
             </form>
-            <div className="text-xs text-gray-400 mb-2 -mt-2 px-1">
-                Use mock URLs: `drive/folder/client-a-files` or `drive/folder/client-b-files`
-            </div>
              
              <div className="flex items-center gap-2 mb-2 text-sm">
                 {isSyncing ? (
