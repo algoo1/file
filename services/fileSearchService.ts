@@ -1,4 +1,3 @@
-
 import { FileObject, Client } from '../types.ts';
 import { summarizeContent } from './geminiService.ts';
 
@@ -66,41 +65,49 @@ export const fileSearchService = {
    * @param fileSearchApiKey The user's API key for this service.
    */
   query: async (client: Client, query: string, fileSearchApiKey: string): Promise<string> => {
-    if (!(await fileSearchService.validateApiKey(fileSearchApiKey))) {
-        return "Error: Invalid File Search API Key.";
+    try {
+        if (!(await fileSearchService.validateApiKey(fileSearchApiKey))) {
+            return "Error: Invalid File Search API Key.";
+        }
+
+        console.log(`Querying data for client ${client.name} with query: "${query}"`);
+        // In a real API: POST /query { clientId, query }
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
+
+        const clientIndex = fileSearchIndex[client.id];
+        if (!clientIndex || clientIndex.files.length === 0) {
+            return "There is no data indexed for this client. Please check the Google Drive sync.";
+        }
+
+        // This part still uses Gemini, but it simulates the backend of the File Search service doing it.
+        // The context is built from the *indexed* summaries.
+        const context = clientIndex.files.map(f => `File: ${f.name}\n${f.summary}`).join('\n\n---\n\n');
+        
+        // Re-using the geminiService function here simulates the backend logic
+        const prompt = `You are a search API. Answer the user's query based ONLY on the provided indexed information. If the answer is not in the information, say "I cannot find an answer in the provided documents."
+
+        Indexed Information:
+        ---
+        ${context}
+        ---
+
+        User Query: "${query}"
+        `;
+        
+        // Dynamically import the library only when it's needed to avoid startup crashes.
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: prompt,
+        });
+        return response.text;
+    } catch (error) {
+        console.error("Error during query:", error);
+        if (error instanceof Error && error.message.includes("API key")) {
+            return "Error: The Gemini API key is not configured correctly on the server.";
+        }
+        return "An unexpected error occurred while querying the data.";
     }
-
-    console.log(`Querying data for client ${client.name} with query: "${query}"`);
-    // In a real API: POST /query { clientId, query }
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-
-    const clientIndex = fileSearchIndex[client.id];
-    if (!clientIndex || clientIndex.files.length === 0) {
-        return "There is no data indexed for this client. Please check the Google Drive sync.";
-    }
-
-    // This part still uses Gemini, but it simulates the backend of the File Search service doing it.
-    // The context is built from the *indexed* summaries.
-    const context = clientIndex.files.map(f => `File: ${f.name}\n${f.summary}`).join('\n\n---\n\n');
-    
-    // Re-using the geminiService function here simulates the backend logic
-    const prompt = `You are a search API. Answer the user's query based ONLY on the provided indexed information. If the answer is not in the information, say "I cannot find an answer in the provided documents."
-
-    Indexed Information:
-    ---
-    ${context}
-    ---
-
-    User Query: "${query}"
-    `;
-    
-    // Dynamically import the library only when it's needed to avoid startup crashes.
-    const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: prompt,
-    });
-    return response.text;
   }
 };
