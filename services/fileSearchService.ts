@@ -1,7 +1,6 @@
 
 import { FileObject, Client } from '../types.ts';
 import { summarizeContent } from './geminiService.ts';
-import { GoogleGenAI } from "@google/genai";
 
 // Mock database for the external File Search service
 const fileSearchIndex: Record<string, { files: Pick<FileObject, 'id' | 'name' | 'summary'>[] }> = {};
@@ -94,6 +93,9 @@ export const fileSearchService = {
 
     User Query: "${query}"
     `;
+    
+    // Dynamically import the library only when it's needed to avoid startup crashes.
+    const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-pro',
