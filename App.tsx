@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [fileSearchApiKey, setFileSearchApiKey] = useState<string>('');
   const [googleApiKey, setGoogleApiKey] = useState<string>('');
   const [googleClientId, setGoogleClientId] = useState<string>('');
+  const [googleClientSecret, setGoogleClientSecret] = useState<string>('');
   const [isGoogleDriveConnected, setIsGoogleDriveConnected] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -150,6 +151,8 @@ const App: React.FC = () => {
             setGoogleApiKey={setGoogleApiKey}
             googleClientId={googleClientId}
             setGoogleClientId={setGoogleClientId}
+            googleClientSecret={googleClientSecret}
+            setGoogleClientSecret={setGoogleClientSecret}
             isGoogleDriveConnected={isGoogleDriveConnected}
             onConnectGoogleDrive={handleConnectGoogleDrive}
           />
