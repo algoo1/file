@@ -1,32 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
+import { SystemSettings } from '../database/schema.ts';
 
 interface SettingsProps {
-  fileSearchApiKey: string;
-  onSaveFileSearchApiKey: (key: string) => void;
-  isGoogleDriveConnected: boolean;
+  settings: SystemSettings | null;
+  onSave: (settings: Partial<SystemSettings>) => Promise<any>;
   onOpenAuthModal: () => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
-  fileSearchApiKey,
-  onSaveFileSearchApiKey,
-  isGoogleDriveConnected,
+  settings,
+  onSave,
   onOpenAuthModal,
 }) => {
-  const [localApiKey, setLocalApiKey] = useState(fileSearchApiKey);
-  const [isSaved, setIsSaved] = useState(false);
+  const [localApiKey, setLocalApiKey] = useState(settings?.fileSearchServiceApiKey || '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
-    // Sync local state if the prop changes (e.g., loaded from localStorage)
-    setLocalApiKey(fileSearchApiKey);
-  }, [fileSearchApiKey]);
+    setLocalApiKey(settings?.fileSearchServiceApiKey || '');
+  }, [settings?.fileSearchServiceApiKey]);
 
-  const handleSave = () => {
-    onSaveFileSearchApiKey(localApiKey);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2000);
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await onSave({ fileSearchServiceApiKey: localApiKey });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch (error) {
+      // Error is alerted in App.tsx
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -38,7 +45,7 @@ const Settings: React.FC<SettingsProps> = ({
       <div className="space-y-4">
         <div>
           <label htmlFor="apiKey" className="block text-sm font-medium text-gray-400 mb-1">
-            File Search API Key
+            File Search Service API Key
           </label>
           <div className="flex gap-2">
             <input
@@ -46,17 +53,18 @@ const Settings: React.FC<SettingsProps> = ({
               type="password"
               value={localApiKey}
               onChange={(e) => setLocalApiKey(e.target.value)}
-              placeholder="Enter your API Key"
+              placeholder="Enter your Service API Key"
               className="flex-grow w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
             />
             <button
               onClick={handleSave}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm"
+              disabled={isSaving}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm disabled:bg-gray-500"
             >
-              Save
+              {isSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
-          {isSaved && <p className="text-xs text-green-400 mt-1">Saved!</p>}
+          {saveSuccess && <p className="text-xs text-green-400 mt-1">Saved!</p>}
         </div>
 
         <div className="border-t border-gray-700 pt-4">
@@ -64,13 +72,13 @@ const Settings: React.FC<SettingsProps> = ({
             <button
                 onClick={onOpenAuthModal}
                 className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
-                    isGoogleDriveConnected 
+                    settings?.isGoogleDriveConnected 
                     ? 'bg-green-600/80 text-white cursor-default' 
                     : 'bg-gray-700 hover:bg-gray-600 text-white'
                 }`}
             >
                 <DriveIcon className="w-5 h-5" />
-                {isGoogleDriveConnected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
+                {settings?.isGoogleDriveConnected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
             </button>
         </div>
       </div>

@@ -1,32 +1,52 @@
-
 import React, { useState, useEffect } from 'react';
-import { Client, FileObject } from '../types.ts';
+import { Client, FileObject, Tag } from '../database/schema.ts';
+import { PlusIcon } from './icons/PlusIcon.tsx';
 
 interface FileManagerProps {
   client: Client;
   isGoogleDriveConnected: boolean;
   onSetFolderUrl: (clientId: string, url: string) => void;
+  onAddTag: (clientId: string, tagName: string) => void;
+  onRemoveTag: (clientId: string, tagId: string) => void;
   isSyncing: boolean;
   syncError: string | null;
 }
 
 const statusIndicator = (status: FileObject['status']) => {
     switch (status) {
-        case 'syncing':
+        case 'SYNCING':
             return <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" title="Syncing..."></div>;
-        case 'indexing':
+        case 'INDEXING':
             return <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse" title="Indexing..."></div>;
-        case 'indexed':
+        case 'COMPLETED':
             return <div className="w-3 h-3 bg-green-500 rounded-full" title="Indexed"></div>;
-        case 'error':
+        case 'FAILED':
             return <div className="w-3 h-3 bg-red-500 rounded-full" title="Error"></div>;
         default:
             return <div className="w-3 h-3 bg-gray-500 rounded-full" title="Idle"></div>;
     }
 }
 
-const FileManager: React.FC<FileManagerProps> = ({ client, isGoogleDriveConnected, onSetFolderUrl, isSyncing, syncError }) => {
+const TagPill: React.FC<{tag: Tag; onRemove: (tagId: string) => void}> = ({ tag, onRemove }) => (
+    <div className="flex items-center bg-gray-600 text-gray-200 text-xs font-semibold px-2 py-1 rounded-full">
+        <span>{tag.name}</span>
+        <button onClick={() => onRemove(tag.id)} className="ml-1.5 text-gray-400 hover:text-white">
+            &times;
+        </button>
+    </div>
+);
+
+const FileManager: React.FC<FileManagerProps> = ({ 
+    client, 
+    isGoogleDriveConnected, 
+    onSetFolderUrl, 
+    onAddTag,
+    onRemoveTag,
+    isSyncing, 
+    syncError 
+}) => {
   const [folderUrl, setFolderUrl] = useState(client.googleDriveFolderUrl || '');
+  const [newTagName, setNewTagName] = useState('');
 
   useEffect(() => {
     setFolderUrl(client.googleDriveFolderUrl || '');
@@ -37,6 +57,14 @@ const FileManager: React.FC<FileManagerProps> = ({ client, isGoogleDriveConnecte
     onSetFolderUrl(client.id, folderUrl);
   };
   
+  const handleAddTag = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newTagName.trim()) {
+        onAddTag(client.id, newTagName.trim());
+        setNewTagName('');
+    }
+  };
+
   const renderContent = () => {
     if (!isGoogleDriveConnected) {
         return <p className="text-gray-500 text-sm text-center py-4">Please connect to Google Drive in Settings first.</p>;
@@ -73,9 +101,9 @@ const FileManager: React.FC<FileManagerProps> = ({ client, isGoogleDriveConnecte
              {syncError && <p className="text-xs text-red-400 mb-2">{syncError}</p>}
             
             <div className="max-h-60 overflow-y-auto pr-1">
-                {client.files.length > 0 ? (
+                {client.syncedFiles.length > 0 ? (
                     <ul className="space-y-2">
-                    {client.files.map(file => (
+                    {client.syncedFiles.map(file => (
                         <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
                         <div className="flex items-center gap-2 truncate">
                             {statusIndicator(file.status)}
@@ -88,13 +116,34 @@ const FileManager: React.FC<FileManagerProps> = ({ client, isGoogleDriveConnecte
                     <p className="text-gray-500 text-sm text-center py-4">No files found in linked folder, or folder not linked yet.</p>
                 )}
             </div>
+
+            <div className="border-t border-gray-700 pt-4 mt-4">
+                 <h3 className="text-md font-semibold text-gray-300 mb-3">Tags</h3>
+                 <div className="flex flex-wrap gap-2 mb-3">
+                    {client.tags.map(tag => (
+                        <TagPill key={tag.id} tag={tag} onRemove={() => onRemoveTag(client.id, tag.id)} />
+                    ))}
+                 </div>
+                 <form onSubmit={handleAddTag} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      placeholder="Add a tag..."
+                      className="flex-grow bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+                    />
+                    <button type="submit" className="bg-gray-600 hover:bg-gray-500 text-white font-bold p-2 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed" disabled={!newTagName.trim()}>
+                        <PlusIcon className="w-5 h-5" />
+                    </button>
+                </form>
+            </div>
         </>
     );
   };
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg flex flex-col">
-      <h2 className="text-lg font-semibold mb-3 text-white">Data Sources (Google Drive)</h2>
+      <h2 className="text-lg font-semibold mb-3 text-white">Data Source Details</h2>
       {renderContent()}
     </div>
   );

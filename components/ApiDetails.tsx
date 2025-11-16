@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { Client } from '../types.ts';
+import { Client } from '../database/schema.ts';
 import { ClipboardIcon } from './icons/ClipboardIcon.tsx';
 
 interface ApiDetailsProps {
@@ -11,13 +10,12 @@ const ApiDetails: React.FC<ApiDetailsProps> = ({ client }) => {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
-  const endpoint = `https://api.filesearch.io/v1/query`; // Changed to a more realistic external API endpoint
+  const endpoint = `/api/v1/search`; 
   
-  const curlCommand = `curl "${endpoint}" \\
-  -H "Authorization: Bearer YOUR_FILE_SEARCH_API_KEY" \\
+  const curlCommand = `curl "https://your-backend-domain.com${endpoint}" \\
+  -H "x-api-key: ${client.apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "clientApiKey": "${client.apiKey}",
     "query": "Your question here"
   }'`;
 
@@ -55,7 +53,6 @@ const ApiDetails: React.FC<ApiDetailsProps> = ({ client }) => {
 
         <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">Example cURL Request</label>
-            <p className="text-xs text-gray-500 mb-2">Note: The authorization bearer token below is your main File Search API key, not the Client-specific key.</p>
             <div className="relative bg-gray-900 rounded-md p-4 text-sm font-mono text-gray-300 border border-gray-700">
                 <button 
                   onClick={() => copyToClipboard(curlCommand, 'curl')}
