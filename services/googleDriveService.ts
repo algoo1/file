@@ -41,9 +41,14 @@ export const googleDriveService = {
             // Prompt user to sign in immediately after initialization
             googleDriveService.signIn();
 
-          } catch (err) {
+          } catch (err: any) {
             console.error("Error initializing GAPI client", err);
-            reject(new Error("Error initializing GAPI client. Check your API Key. It might be invalid or restricted."));
+            
+            const baseMessage = "Failed to initialize Google Drive connection.";
+            const userTip = "Please verify your Google Cloud project setup: \n1) The Google Drive API is enabled. \n2) The API Key is correct and has the right restrictions (e.g. HTTP referrers). \n3) The OAuth Client ID has the correct Authorized JavaScript origins.";
+            const technicalDetails = err?.result?.error?.message ? `(Details: ${err.result.error.message})` : '(See browser console for more info).';
+
+            reject(new Error(`${baseMessage} ${technicalDetails}\n\n${userTip}`));
           }
         });
       });
