@@ -42,13 +42,27 @@ export const googleDriveService = {
             googleDriveService.signIn();
 
           } catch (err: any) {
-            console.error("Error initializing GAPI client", err);
-            
-            const baseMessage = "Failed to initialize Google Drive connection.";
-            const userTip = "Please verify your Google Cloud project setup: \n1) The Google Drive API is enabled. \n2) The API Key is correct and has the right restrictions (e.g. HTTP referrers). \n3) The OAuth Client ID has the correct Authorized JavaScript origins.";
-            const technicalDetails = err?.result?.error?.message ? `(Details: ${err.result.error.message})` : '(See browser console for more info).';
+            console.error("Error details during GAPI client initialization:", err);
+  
+            let details = "An unknown error occurred.";
+            if (err?.result?.error?.message) {
+                details = err.result.error.message;
+            } else if (err?.details) {
+                details = err.details;
+            } else if (typeof err === 'string') {
+                details = err;
+            } else if (err instanceof Error) {
+                details = err.message;
+            }
 
-            reject(new Error(`${baseMessage} ${technicalDetails}\n\n${userTip}`));
+            const friendlyMessage = `Connection to Google Drive failed.\n\n` +
+              `Error from Google: "${details}"\n\n` +
+              `Common issues to check in your Google Cloud project:\n` +
+              `1. Is the Google Drive API enabled?\n` +
+              `2. Is the API Key correct and without incorrect restrictions (like HTTP referrers)? Your current URL must be allowed.\n` +
+              `3. Is your current URL added to the OAuth Client ID's 'Authorized JavaScript origins'?`;
+
+            reject(new Error(friendlyMessage));
           }
         });
       });

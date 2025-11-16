@@ -99,39 +99,52 @@ const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
 
             <div className="bg-gray-900/50 p-4 rounded-md mt-6 border border-gray-700">
                 <h3 className="text-md font-semibold text-gray-200 mb-2">Required Google Cloud Console Setup</h3>
-                <p className="text-sm text-gray-400 mb-3">Before connecting, please ensure you have completed these steps in your <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Google Cloud Project</a>:</p>
-                <ol className="list-decimal list-inside text-sm space-y-3 text-gray-300">
+                <p className="text-sm text-gray-400 mb-3">Follow these steps carefully in your Google Cloud Project. It can take a few minutes for Google's settings to update after saving.</p>
+                <ol className="list-decimal list-inside text-sm space-y-4 text-gray-300">
                     <li>
-                        <strong>Enable the Google Drive API.</strong>
-                        <p className="text-xs text-gray-400 ml-4">Go to "APIs & Services" &gt; "Library", search for "Google Drive API", and click "Enable".</p>
+                        <strong>Enable the Google Drive API</strong>
+                        <p className="text-xs text-gray-400 ml-4 mt-1">Go to the Google Drive API page and click "Enable".</p>
+                        <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-xs ml-4 text-blue-400 hover:underline">
+                            Open Google Drive API Library &rarr;
+                        </a>
                     </li>
                     <li>
-                        <strong>Create an API Key.</strong>
-                        <p className="text-xs text-gray-400 ml-4">In "Credentials", create an "API key". Paste it into the "Google API Key" field above.</p>
-                    </li>
-                    <li>
-                        <strong>Create an OAuth 2.0 Client ID.</strong>
-                        <p className="text-xs text-gray-400 ml-4">In "Credentials", create an "OAuth client ID" for a "Web application". Paste the "Client ID" above.</p>
-                    </li>
-                    <li>
-                        <strong>Configure OAuth Client ID.</strong>
-                        <p className="text-xs text-gray-400 ml-4">In your OAuth Client ID settings, under <span className="font-mono text-gray-300 bg-gray-700/50 px-1 py-0.5 rounded-sm">Authorized JavaScript origins</span>, add these URLs:</p>
-                        <ul className="text-xs space-y-1 mt-2 ml-6 font-mono">
-                          <li className="flex items-center gap-2">
-                            <span className="text-green-400">{userDomain}</span>
-                            <button type="button" onClick={() => copyToClipboard(userDomain, 1)} title="Copy URL">
-                                <ClipboardIcon className={`w-4 h-4 ${copiedOrigin1 ? 'text-green-400' : 'text-gray-500 hover:text-white'}`} />
-                            </button>
-                            {copiedOrigin1 && <span className="text-green-400 text-xs">Copied!</span>}
-                          </li>
-                          <li className="flex items-center gap-2">
-                             <span className="text-green-400">{currentOrigin}</span>
-                             <button type="button" onClick={() => copyToClipboard(currentOrigin, 2)} title="Copy URL">
-                                <ClipboardIcon className={`w-4 h-4 ${copiedOrigin2 ? 'text-green-400' : 'text-gray-500 hover:text-white'}`} />
-                            </button>
-                            {copiedOrigin2 && <span className="text-green-400 text-xs">Copied!</span>}
-                          </li>
+                        <strong>Create Credentials</strong>
+                        <p className="text-xs text-gray-400 ml-4 mt-1">Go to the Credentials page to create an API Key and OAuth Client ID.</p>
+                        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-xs ml-4 text-blue-400 hover:underline">
+                            Open Credentials Page &rarr;
+                        </a>
+                        <ul className="list-disc list-inside text-xs text-gray-400 ml-8 mt-2 space-y-2">
+                            <li>
+                                <strong>API Key:</strong> Click "CREATE CREDENTIALS" &rarr; "API key". Paste this key into the "Google API Key" field above. For security, you should restrict it to "HTTP referrers" and add the URLs from Step 3.
+                            </li>
+                            <li>
+                                <strong>OAuth 2.0 Client ID:</strong> Click "CREATE CREDENTIALS" &rarr; "OAuth client ID". Choose "Web application". Paste the "Client ID" (not the secret) into the "Google Client ID" field above.
+                            </li>
                         </ul>
+                    </li>
+                    <li>
+                        <strong>Add Authorized JavaScript Origins</strong>
+                        <p className="text-xs text-gray-400 ml-4 mt-1">In your <strong className="text-gray-300">OAuth Client ID</strong>'s settings, find the "Authorized JavaScript origins" section and add BOTH of the following URLs:</p>
+                        <div className="text-xs space-y-1 mt-2 ml-8 font-mono bg-gray-900 p-2 rounded-md">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-green-400 break-all">{userDomain}</span>
+                                <button type="button" onClick={() => copyToClipboard(userDomain, 1)} title="Copy URL" className="flex-shrink-0 flex items-center gap-1 text-gray-400 hover:text-white px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600">
+                                    <ClipboardIcon className={`w-4 h-4 ${copiedOrigin1 ? 'text-green-400' : ''}`} />
+                                    <span>{copiedOrigin1 ? 'Copied!' : 'Copy'}</span>
+                                </button>
+                            </div>
+                             <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <span className="text-green-400 break-all">{currentOrigin}</span>
+                                    <span className="text-blue-400 text-xs font-sans ml-2 whitespace-nowrap">(Your current URL)</span>
+                                </div>
+                                <button type="button" onClick={() => copyToClipboard(currentOrigin, 2)} title="Copy URL" className="flex-shrink-0 flex items-center gap-1 text-gray-400 hover:text-white px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600">
+                                    <ClipboardIcon className={`w-4 h-4 ${copiedOrigin2 ? 'text-green-400' : ''}`} />
+                                    <span>{copiedOrigin2 ? 'Copied!' : 'Copy'}</span>
+                                </button>
+                            </div>
+                        </div>
                     </li>
                 </ol>
             </div>
