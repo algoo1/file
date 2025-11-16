@@ -30,76 +30,77 @@ function waitForGlobal<T>(name: 'gapi' | 'google', timeout = 8000): Promise<T> {
 
 export const googleDriveService = {
   /**
-   * Initializes the GAPI client and authenticates the user with Google.
+   * Initializes the GAPI client and authenticates the user with Google using a robust sequential flow.
    */
   connect: async (apiKey: string, clientId: string): Promise<void> => {
     try {
-      // 1. Wait for both scripts to load and populate their globals
       const gapi = await waitForGlobal<any>('gapi');
       const google = await waitForGlobal<any>('google');
 
-      // 2. Load the GAPI client library and initialize it for Drive API calls
+      // Step 1: Load the GAPI client library.
       await new Promise<void>((resolve, reject) => {
-          gapi.load('client', async () => {
-              try {
-                  await gapi.client.init({
-                      apiKey: apiKey,
-                      discoveryDocs: [DISCOVERY_DOC],
-                  });
-                  console.log("GAPI client initialized successfully.");
-                  resolve();
-              } catch (err: any) {
-                  console.error("Error details during GAPI client initialization:", err);
-                  let details = err.details || (err.result?.error?.message) || err.message || "An unknown error occurred.";
-                  
-                  const friendlyMessage = `Failed to initialize Google Drive client.\n\n` +
-                    `Error from Google: "${details}"\n\n` +
-                    `Please check your Google Cloud project setup:\n` +
-                    `1. Is the Google Drive API enabled?\n` +
-                    `2. Is the API Key correct and unrestricted, or does it allow your current URL (${window.location.origin}) as an HTTP referrer?`;
-                    
-                  reject(new Error(friendlyMessage));
-              }
-          });
+        gapi.load('client', {
+          callback: resolve,
+          onerror: reject,
+          timeout: 5000,
+          ontimeout: () => reject(new Error('GAPI client load timed out.'))
+        });
       });
 
-      // 3. Initialize the GSI token client and get user consent + access token
-      return new Promise<void>((resolve, reject) => {
-          try {
-              tokenClient = google.accounts.oauth2.initTokenClient({
-                  client_id: clientId,
-                  scope: SCOPES,
-                  callback: (tokenResponse: any) => {
-                      if (tokenResponse && tokenResponse.access_token) {
-                          console.log("Successfully authenticated and received access token.");
-                          // Set the token for GAPI client to use
-                          gapi.client.setToken({ access_token: tokenResponse.access_token });
-                          resolve();
-                      } else {
-                          reject(new Error("Authentication failed: No access token was received from Google. The user may have cancelled the sign-in."));
-                      }
-                  },
-                   error_callback: (error: any) => {
-                      console.error("GSI Authentication Error Callback:", error);
-                       const friendlyMessage = `Authentication failed.\n\n` +
-                        `Error from Google: "${error.type || 'Unknown error'}"\n\n` +
-                        `Please check your Google Cloud project setup:\n` +
-                        `1. Is the OAuth Client ID correct?\n` +
-                        `2. Have you added your current URL (${window.location.origin}) to the 'Authorized JavaScript origins' for that Client ID?`;
-
-                      reject(new Error(friendlyMessage));
-                  },
-              });
-              // Prompt user to sign in
-              tokenClient.requestAccessToken({ prompt: 'consent' });
-          } catch (err: any) {
-              console.error("Error initializing GSI token client:", err);
-              reject(err);
-          }
+      // Step 2: Initialize the GAPI client. This does not perform user authentication.
+      await gapi.client.init({
+        apiKey: apiKey,
+        discoveryDocs: [DISCOVERY_DOC],
       });
-    } catch (error) {
-        console.error("Google Drive connection process failed:", error);
-        throw error; // Re-throw the formatted error from the failed step
+      console.log("GAPI client initialized successfully.");
+
+      // Step 3: Use GSI for authentication (token flow) and get the token.
+      const tokenResponse = await new Promise<any>((resolve, reject) => {
+        try {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: clientId,
+                scope: SCOPES,
+                callback: (response: any) => {
+                    if (response.error) {
+                        return reject(response);
+                    }
+                    if (!response.access_token) {
+                         return reject(new Error("Authentication failed: No access token was received from Google. The user may have cancelled the sign-in."));
+                    }
+                    console.log("Successfully authenticated and received access token.");
+                    resolve(response);
+                },
+                error_callback: (error: any) => {
+                    const friendlyMessage = `Authentication failed.\n\n` +
+                      `Error from Google: "${error.type || 'Unknown error'}"\n\n` +
+                      `Please check your Google Cloud project setup:\n` +
+                      `1. Is the OAuth Client ID correct?\n` +
+                      `2. Have you added your current URL (${window.location.origin}) to the 'Authorized JavaScript origins' for that Client ID?`;
+                    reject(new Error(friendlyMessage));
+                },
+            });
+            tokenClient.requestAccessToken({ prompt: 'consent' });
+        } catch(err) {
+            reject(err);
+        }
+      });
+      
+      // Step 4: Set the access token for the GAPI client.
+      gapi.client.setToken({ access_token: tokenResponse.access_token });
+      
+    } catch (err: any) {
+        console.error("Google Drive connection process failed:", err);
+        // Consolidate error messages for better debugging.
+        if (err.details || err.result?.error?.message) {
+             let details = err.details || (err.result?.error?.message) || "An unknown error occurred.";
+             const friendlyMessage = `Failed to initialize Google Drive client.\n\n` +
+                `Error from Google: "${details}"\n\n` +
+                `Please check your Google Cloud project setup:\n` +
+                `1. Is the Google Drive API enabled?\n` +
+                `2. Is the API Key correct and unrestricted, or does it allow your current URL (${window.location.origin}) as an HTTP referrer?`;
+            throw new Error(friendlyMessage);
+        }
+        throw err;
     }
   },
 
