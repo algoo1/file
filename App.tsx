@@ -11,6 +11,13 @@ import Settings from './components/Settings.tsx';
 import GoogleAuthModal from './components/GoogleAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
 
+// LocalStorage Keys
+const LS_CLIENTS = 'driveSync_clients';
+const LS_FILE_SEARCH_API_KEY = 'driveSync_fileSearchApiKey';
+const LS_GOOGLE_API_KEY = 'driveSync_googleApiKey';
+const LS_GOOGLE_CLIENT_ID = 'driveSync_googleClientId';
+const LS_GOOGLE_CLIENT_SECRET = 'driveSync_googleClientSecret';
+
 const App: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -29,6 +36,22 @@ const App: React.FC = () => {
   
   const pollingIntervalRef = useRef<number | null>(null);
 
+  // Load settings from LocalStorage on initial render
+  useEffect(() => {
+    try {
+        const savedClients = localStorage.getItem(LS_CLIENTS);
+        if (savedClients) setClients(JSON.parse(savedClients));
+
+        setFileSearchApiKey(localStorage.getItem(LS_FILE_SEARCH_API_KEY) || '');
+        setGoogleApiKey(localStorage.getItem(LS_GOOGLE_API_KEY) || '');
+        setGoogleClientId(localStorage.getItem(LS_GOOGLE_CLIENT_ID) || '');
+        setGoogleClientSecret(localStorage.getItem(LS_GOOGLE_CLIENT_SECRET) || '');
+
+    } catch (error) {
+        console.error("Failed to load settings from localStorage", error);
+    }
+  }, []);
+
   useEffect(() => {
     googleApiService.loadScripts().then(() => {
         setApiScriptsLoaded(true);
@@ -38,14 +61,38 @@ const App: React.FC = () => {
         alert("Could not load necessary Google scripts. Please check your internet connection and refresh the page.");
     });
   }, []);
+  
+  // Wrapper for setClients to automatically save to localStorage
+  const updateClients = (updater: React.SetStateAction<Client[]>) => {
+    setClients(prevClients => {
+      const newClients = typeof updater === 'function' ? updater(prevClients) : updater;
+      localStorage.setItem(LS_CLIENTS, JSON.stringify(newClients));
+      return newClients;
+    });
+  };
 
-  const handleConnectGoogleDrive = useCallback(async () => {
-    if (!googleApiKey || !googleClientId) {
+  const handleSaveFileSearchApiKey = (key: string) => {
+    setFileSearchApiKey(key);
+    localStorage.setItem(LS_FILE_SEARCH_API_KEY, key);
+  };
+
+  const handleSaveGoogleCredentials = (creds: { apiKey: string; clientId: string; clientSecret: string }) => {
+    setGoogleApiKey(creds.apiKey);
+    setGoogleClientId(creds.clientId);
+    setGoogleClientSecret(creds.clientSecret);
+    localStorage.setItem(LS_GOOGLE_API_KEY, creds.apiKey);
+    localStorage.setItem(LS_GOOGLE_CLIENT_ID, creds.clientId);
+    localStorage.setItem(LS_GOOGLE_CLIENT_SECRET, creds.clientSecret);
+  };
+
+  const handleConnectGoogleDrive = useCallback(async (creds: { apiKey: string; clientId: string; clientSecret: string }) => {
+    handleSaveGoogleCredentials(creds); // Save credentials before connecting
+    if (!creds.apiKey || !creds.clientId) {
       alert("Please provide both Google API Key and Client ID in settings.");
       return;
     }
     try {
-      await googleDriveService.connect(googleApiKey, googleClientId);
+      await googleDriveService.connect(creds.apiKey, creds.clientId);
       setIsGoogleDriveConnected(true);
       setIsAuthModalOpen(false); // Close modal on success
     } catch (error) {
@@ -53,7 +100,7 @@ const App: React.FC = () => {
       alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
       setIsGoogleDriveConnected(false);
     }
-  }, [googleApiKey, googleClientId]);
+  }, []);
 
   const handleAddClient = useCallback((name: string) => {
     if (name.trim()) {
@@ -64,7 +111,7 @@ const App: React.FC = () => {
         apiKey: `key_${crypto.randomUUID()}`,
         googleDriveFolderUrl: null,
       };
-      setClients(prev => [...prev, newClient]);
+      updateClients(prev => [...prev, newClient]);
       setSelectedClientId(newClient.id);
     }
   }, []);
@@ -74,7 +121,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleSetFolderUrl = useCallback((clientId: string, url: string) => {
-      setClients(prev => prev.map(c => c.id === clientId ? { ...c, googleDriveFolderUrl: url } : c));
+      updateClients(prev => prev.map(c => c.id === clientId ? { ...c, googleDriveFolderUrl: url } : c));
   }, []);
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
@@ -101,7 +148,7 @@ const App: React.FC = () => {
 
             if (currentContent !== newContent) {
                 console.log("Change detected! Starting full sync.");
-                setClients(prev => prev.map(c => 
+                updateClients(prev => prev.map(c => 
                     c.id === selectedClient.id 
                         ? { ...c, files: driveFiles.map(df => ({...df, summary: '...', status: 'syncing'})) }
                         : c
@@ -109,7 +156,7 @@ const App: React.FC = () => {
                 
                 const indexedFiles = await fileSearchService.syncClientFiles(selectedClient, driveFiles, fileSearchApiKey);
                 
-                setClients(prev => prev.map(c => c.id === selectedClient.id ? { ...c, files: indexedFiles } : c));
+                updateClients(prev => prev.map(c => c.id === selectedClient.id ? { ...c, files: indexedFiles } : c));
                 console.log("Sync successful.");
             } else {
                 console.log("No changes detected.");
@@ -152,7 +199,7 @@ const App: React.FC = () => {
         <aside className="w-full md:w-1/3 lg:w-1/4 flex flex-col gap-6">
           <Settings 
             fileSearchApiKey={fileSearchApiKey}
-            setFileSearchApiKey={setFileSearchApiKey}
+            onSaveFileSearchApiKey={handleSaveFileSearchApiKey}
             isGoogleDriveConnected={isGoogleDriveConnected}
             onOpenAuthModal={() => setIsAuthModalOpen(true)}
           />
@@ -191,13 +238,11 @@ const App: React.FC = () => {
       {isAuthModalOpen && (
         <GoogleAuthModal 
             onClose={() => setIsAuthModalOpen(false)}
-            googleApiKey={googleApiKey}
-            setGoogleApiKey={setGoogleApiKey}
-            googleClientId={googleClientId}
-            setGoogleClientId={setGoogleClientId}
-            googleClientSecret={googleClientSecret}
-            setGoogleClientSecret={setGoogleClientSecret}
-            onConnectGoogleDrive={handleConnectGoogleDrive}
+            initialApiKey={googleApiKey}
+            initialClientId={googleClientId}
+            initialClientSecret={googleClientSecret}
+            onSave={handleSaveGoogleCredentials}
+            onConnect={handleConnectGoogleDrive}
             isGoogleDriveConnected={isGoogleDriveConnected}
             apiScriptsLoaded={apiScriptsLoaded}
         />

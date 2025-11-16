@@ -1,20 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
 
 interface SettingsProps {
   fileSearchApiKey: string;
-  setFileSearchApiKey: (key: string) => void;
+  onSaveFileSearchApiKey: (key: string) => void;
   isGoogleDriveConnected: boolean;
   onOpenAuthModal: () => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
   fileSearchApiKey,
-  setFileSearchApiKey,
+  onSaveFileSearchApiKey,
   isGoogleDriveConnected,
   onOpenAuthModal,
 }) => {
+  const [localApiKey, setLocalApiKey] = useState(fileSearchApiKey);
+  const [isSaved, setIsSaved] = useState(false);
+
+  useEffect(() => {
+    // Sync local state if the prop changes (e.g., loaded from localStorage)
+    setLocalApiKey(fileSearchApiKey);
+  }, [fileSearchApiKey]);
+
+  const handleSave = () => {
+    onSaveFileSearchApiKey(localApiKey);
+    setIsSaved(true);
+    setTimeout(() => setIsSaved(false), 2000);
+  };
+
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg">
       <h2 className="text-lg font-semibold mb-3 text-white flex items-center gap-2">
@@ -26,14 +40,23 @@ const Settings: React.FC<SettingsProps> = ({
           <label htmlFor="apiKey" className="block text-sm font-medium text-gray-400 mb-1">
             File Search API Key
           </label>
-          <input
-            id="apiKey"
-            type="password"
-            value={fileSearchApiKey}
-            onChange={(e) => setFileSearchApiKey(e.target.value)}
-            placeholder="Enter your API Key"
-            className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-          />
+          <div className="flex gap-2">
+            <input
+              id="apiKey"
+              type="password"
+              value={localApiKey}
+              onChange={(e) => setLocalApiKey(e.target.value)}
+              placeholder="Enter your API Key"
+              className="flex-grow w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+            />
+            <button
+              onClick={handleSave}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm"
+            >
+              Save
+            </button>
+          </div>
+          {isSaved && <p className="text-xs text-green-400 mt-1">Saved!</p>}
         </div>
 
         <div className="border-t border-gray-700 pt-4">
