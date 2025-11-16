@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Client, SystemSettings, Tag } from './types.ts';
+import { Client, SystemSettings } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import ClientManager from './components/ClientManager.tsx';
 import FileManager from './components/FileManager.tsx';
@@ -26,6 +26,9 @@ const App: React.FC = () => {
         const { clients: initialClients, settings: initialSettings } = await apiService.getInitialData();
         setClients(initialClients);
         setSettings(initialSettings);
+        if (initialClients.length > 0 && !selectedClientId) {
+          setSelectedClientId(initialClients[0].id);
+        }
       } catch (error) {
         console.error("Failed to initialize app data:", error);
         alert("Could not connect to the server. Please refresh the page.");
@@ -48,23 +51,22 @@ const App: React.FC = () => {
     }
   }, []);
   
-  const handleConnectGoogleDrive = useCallback(async (creds: { apiKey: string; clientId: string; clientSecret: string }) => {
+  const handleConnectGoogleDrive = useCallback(async (creds: { apiKey: string; clientId: string; }) => {
     try {
-      const updatedSettings = await handleSaveSettings({
+      await handleSaveSettings({
         googleApiKey: creds.apiKey,
         googleClientId: creds.clientId,
-        googleClientSecret: creds.clientSecret,
       });
-      const connectionStatus = await apiService.connectGoogleDrive(updatedSettings);
-      setSettings(prev => prev ? { ...prev, isGoogleDriveConnected: connectionStatus.connected } : null);
-      if (connectionStatus.connected) {
-        setIsAuthModalOpen(false);
-      } else {
-        throw new Error(connectionStatus.error || "Connection failed for an unknown reason.");
-      }
+      await apiService.connectGoogleDrive(creds);
+      const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: true }); // Ensure state is correct
+      setSettings(finalSettings);
+      setIsAuthModalOpen(false);
     } catch (error) {
+      const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: false }); // Ensure state is correct
+      setSettings(finalSettings);
       console.error("Google Drive connection failed:", error);
       alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
+      throw error; // Re-throw to keep modal open
     }
   }, [handleSaveSettings]);
 
@@ -111,15 +113,11 @@ const App: React.FC = () => {
 
         setIsSyncing(true);
         setSyncError(null);
-        console.log(`Checking for updates for ${selectedClient.name}...`);
         
         try {
             const result = await apiService.syncDataSource(selectedClient.id);
             if (result.status === 'changed') {
-              console.log("Change detected! Sync successful.");
               setClients(prev => prev.map(c => c.id === selectedClient.id ? result.client : c));
-            } else {
-              console.log("No changes detected.");
             }
         } catch (error) {
             console.error("Sync failed:", error);
@@ -131,7 +129,7 @@ const App: React.FC = () => {
     
     if (selectedClient && selectedClient.googleDriveFolderUrl) {
         syncAndPoll(); // Initial sync check
-        pollingIntervalRef.current = window.setInterval(syncAndPoll, 10000); // Poll every 10 seconds
+        pollingIntervalRef.current = window.setInterval(syncAndPoll, 30000); // Poll every 30 seconds
     }
 
     return () => {

@@ -7,7 +7,7 @@ interface GoogleAuthModalProps {
   onClose: () => void;
   initialSettings: SystemSettings;
   isConnected: boolean;
-  onConnect: (creds: { apiKey: string; clientId: string; clientSecret: string }) => Promise<void>;
+  onConnect: (creds: { apiKey: string; clientId: string; }) => Promise<void>;
 }
 
 const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
@@ -18,7 +18,6 @@ const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
 }) => {
   const [apiKey, setApiKey] = useState(initialSettings.googleApiKey);
   const [clientId, setClientId] = useState(initialSettings.googleClientId);
-  const [clientSecret, setClientSecret] = useState(initialSettings.googleClientSecret);
   const [isConnecting, setIsConnecting] = useState(false);
   const [copiedOrigin1, setCopiedOrigin1] = useState(false);
   const [copiedOrigin2, setCopiedOrigin2] = useState(false);
@@ -29,7 +28,7 @@ const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
   const handleConnect = async () => {
     setIsConnecting(true);
     try {
-      await onConnect({ apiKey, clientId, clientSecret });
+      await onConnect({ apiKey, clientId });
       // On success, the modal will be closed by the parent component
     } catch (error) {
       // Error is alerted in the parent component
@@ -82,19 +81,6 @@ const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
                 className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
                 />
             </div>
-            <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Google Client Secret</label>
-                <input
-                type="password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder="Enter your Google Cloud OAuth Client Secret"
-                className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-                />
-                 <p className="text-xs text-gray-500 mt-1">
-                    Security Note: The Client Secret is for backend tools like n8n and is <span className="font-semibold">not used</span> by this client-side application.
-                </p>
-            </div>
             </div>
 
             <div className="bg-gray-900/50 p-4 rounded-md mt-6 border border-gray-700">
@@ -119,7 +105,7 @@ const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
                                 <strong>API Key:</strong> Click "CREATE CREDENTIALS" &rarr; "API key". Paste this key into the "Google API Key" field above. For security, you should restrict it to "HTTP referrers" and add the URLs from Step 3.
                             </li>
                             <li>
-                                <strong>OAuth 2.0 Client ID:</strong> Click "CREATE CREDENTIALS" &rarr; "OAuth client ID". Choose "Web application". Paste the "Client ID" (not the secret) into the "Google Client ID" field above.
+                                <strong>OAuth 2.0 Client ID:</strong> Click "CREATE CREDENTIALS" &rarr; "OAuth client ID". Choose "Web application". Paste the "Client ID" into the "Google Client ID" field above.
                             </li>
                         </ul>
                     </li>
