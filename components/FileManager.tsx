@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Client, FileObject, Tag } from '../database/schema.ts';
+import { Client, SyncedFile, Tag } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
 
 interface FileManagerProps {
@@ -12,7 +12,7 @@ interface FileManagerProps {
   syncError: string | null;
 }
 
-const statusIndicator = (status: FileObject['status']) => {
+const statusIndicator = (status: SyncedFile['status']) => {
     switch (status) {
         case 'SYNCING':
             return <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" title="Syncing..."></div>;

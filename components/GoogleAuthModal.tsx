@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { DriveIcon } from './icons/DriveIcon.tsx';
 import { ClipboardIcon } from './icons/ClipboardIcon.tsx';
-import { SystemSettings } from '../database/schema.ts';
+import { SystemSettings } from '../types.ts';
 
 interface GoogleAuthModalProps {
   onClose: () => void;

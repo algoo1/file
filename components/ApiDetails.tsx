@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Client } from '../database/schema.ts';
+import { Client } from '../types.ts';
 import { ClipboardIcon } from './icons/ClipboardIcon.tsx';
 
 interface ApiDetailsProps {

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Client, SystemSettings, Tag } from './database/schema.ts';
+import { Client, SystemSettings, Tag } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import ClientManager from './components/ClientManager.tsx';
 import FileManager from './components/FileManager.tsx';

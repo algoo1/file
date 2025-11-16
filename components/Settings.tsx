@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
-import { SystemSettings } from '../database/schema.ts';
+import { SystemSettings } from '../types.ts';
 
 interface SettingsProps {
   settings: SystemSettings | null;

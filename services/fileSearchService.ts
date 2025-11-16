@@ -43,10 +43,12 @@ export const fileSearchService = {
     const processedFiles: FileObject[] = await Promise.all(filesFromDrive.map(async (driveFile) => {
         try {
             const summary = await summarizeContent(driveFile.content);
-            return { ...driveFile, summary, status: 'indexed' };
+            // FIX: Changed status from 'indexed' to 'COMPLETED' to match the FileObject type definition.
+            return { ...driveFile, summary, status: 'COMPLETED' };
         } catch (e) {
             console.error(`Failed to summarize ${driveFile.name}`, e);
-            return { ...driveFile, summary: '', status: 'error' };
+            // FIX: Changed status from 'error' to 'FAILED' to match the FileObject type definition.
+            return { ...driveFile, summary: '', status: 'FAILED' };
         }
     }));
     
