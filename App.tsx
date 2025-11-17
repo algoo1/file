@@ -1,5 +1,6 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { Client, SystemSettings } from './types.ts';
+import { Client, SystemSettings, SyncedFile } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
 import ClientManager from './components/ClientManager.tsx';
@@ -49,7 +50,8 @@ const App: React.FC = () => {
       if (!selectedClient?.id) return;
       console.log(`Auto-syncing for client: ${selectedClient.name} with interval ${selectedClient.syncInterval}ms`);
       try {
-        const result = await apiService.syncDataSource(selectedClient.id);
+        // Auto-syncs don't need real-time progress updates in the UI, so we pass a no-op callback.
+        const result = await apiService.syncDataSource(selectedClient.id, () => {});
         if (result.status === 'changed') {
           // Use functional update to avoid capturing stale state in the interval closure
           setClients(prevClients => prevClients.map(c => c.id === result.client.id ? result.client : c));
@@ -131,11 +133,34 @@ const App: React.FC = () => {
     }
 
     setIsSyncingClient(clientId);
+    
+    // Define the real-time progress handler for the UI
+    const onProgress = (event: { type: 'INITIAL_LIST', files: SyncedFile[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { id: string } }) => {
+        setClients(prevClients => 
+            prevClients.map(c => {
+                if (c.id === clientId) {
+                    if (event.type === 'INITIAL_LIST') {
+                        // Set the initial list of files to be processed
+                        return { ...c, syncedFiles: event.files };
+                    }
+                    if (event.type === 'FILE_UPDATE') {
+                        // Update the status of a single file
+                        const newSyncedFiles = c.syncedFiles.map(f =>
+                            f.id === event.update.id ? { ...f, ...event.update } : f
+                        );
+                        return { ...c, syncedFiles: newSyncedFiles };
+                    }
+                }
+                return c;
+            })
+        );
+    };
+
     try {
-        const result = await apiService.syncDataSource(clientId);
-         if (result.status === 'changed') {
-            setClients(prevClients => prevClients.map(c => c.id === clientId ? result.client : c));
-        }
+        // The service orchestrates the sync and calls onProgress to update the UI
+        const result = await apiService.syncDataSource(clientId, onProgress);
+        // Do a final state reconciliation to ensure consistency
+        setClients(prevClients => prevClients.map(c => c.id === clientId ? result.client : c));
     } catch (error) {
         console.error("Manual sync failed:", error);
         alert(`Failed to sync data source: ${error instanceof Error ? error.message : String(error)}`);
@@ -164,7 +189,8 @@ const App: React.FC = () => {
 
     try {
         // Sync data source on-demand before every search to ensure data is fresh.
-        const result = await apiService.syncDataSource(selectedClient.id);
+        // No-op progress handler for background sync.
+        const result = await apiService.syncDataSource(selectedClient.id, () => {});
          if (result.status === 'changed') {
             setClients(prev => prev.map(c => c.id === selectedClient.id ? result.client : c));
         }

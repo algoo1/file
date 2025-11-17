@@ -1,7 +1,8 @@
+
 import { databaseService } from './databaseService.ts';
 import { googleDriveService } from './googleDriveService.ts';
 import { fileSearchService } from './fileSearchService.ts';
-import { SystemSettings, Client, FileObject } from '../types.ts';
+import { SystemSettings, Client, FileObject, SyncedFile } from '../types.ts';
 
 // This service is the main public API for the UI.
 // It orchestrates calls to the other services (database, google, file search).
@@ -48,7 +49,10 @@ export const apiService = {
       return await databaseService.removeTagFromClient(clientId, tagId);
   },
 
-  syncDataSource: async (clientId: string) => {
+  syncDataSource: async (
+    clientId: string, 
+    onProgress: (event: { type: 'INITIAL_LIST', files: SyncedFile[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { id: string } }) => void
+  ) => {
     const client = await databaseService.getClientById(clientId);
     const settings = await databaseService.getSettings();
 
@@ -62,27 +66,72 @@ export const apiService = {
       throw new Error("File Search Service API Key is not set.");
     }
 
-    // 1. Fetch files from Google Drive
-    const filesFromDrive = await googleDriveService.getFilesFromFolder(client.googleDriveFolderUrl);
+    // 1. Fetch list of file metadata from Google Drive
+    const filesMetaFromDrive = await googleDriveService.getListOfFiles(client.googleDriveFolderUrl);
     
-    // Check if there's any change by comparing file IDs
-    const currentFileIds = new Set(client.syncedFiles.map(f => f.id));
-    const newFileIds = new Set(filesFromDrive.map(f => f.id));
+    // Check if there's any change by comparing file IDs and names to avoid unnecessary syncs
+    const currentFilesSignature = client.syncedFiles.map(f => f.id + f.name).sort().join();
+    const newFilesSignature = filesMetaFromDrive.map(f => f.id + f.name).sort().join();
+
+    if (currentFilesSignature === newFilesSignature) {
+        console.log("No file changes detected, skipping sync.");
+        return { status: 'unchanged', client };
+    }
     
-    if (currentFileIds.size === newFileIds.size && [...currentFileIds].every(id => newFileIds.has(id))) {
-      console.log("No file changes detected, skipping sync.");
-      return { status: 'unchanged', client };
+    // 2. Prepare initial UI state and clear the old search index
+    const initialSyncedFiles: SyncedFile[] = filesMetaFromDrive.map(f => ({
+        id: f.id,
+        name: f.name,
+        status: 'IDLE',
+        statusMessage: 'In queue...'
+    }));
+
+    onProgress({ type: 'INITIAL_LIST', files: initialSyncedFiles });
+    await fileSearchService.clearIndexForClient(clientId);
+
+    // FIX: Define getFileType with an explicit return type and move it outside the loop.
+    const getFileType = (mimeType: string): 'pdf' | 'sheet' => mimeType.includes('spreadsheet') ? 'sheet' : 'pdf';
+
+    // 3. Process each file sequentially
+    const allProcessedFiles: FileObject[] = [];
+    for (const fileMeta of filesMetaFromDrive) {
+        let finalFileObject: FileObject;
+        
+        try {
+            onProgress({ type: 'FILE_UPDATE', update: { id: fileMeta.id, status: 'SYNCING', statusMessage: 'Fetching content...' }});
+            const content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
+
+            onProgress({ type: 'FILE_UPDATE', update: { id: fileMeta.id, status: 'INDEXING', statusMessage: 'Summarizing with AI...' }});
+            
+            const fileData = {
+                id: fileMeta.id,
+                name: fileMeta.name,
+                content: content,
+                type: getFileType(fileMeta.mimeType),
+            };
+            
+            finalFileObject = await fileSearchService.indexSingleFile(client, fileData, settings.fileSearchServiceApiKey);
+            
+        } catch (error) {
+             console.error(`Critical error processing file ${fileMeta.name}:`, error);
+             finalFileObject = {
+                 id: fileMeta.id,
+                 name: fileMeta.name,
+                 type: getFileType(fileMeta.mimeType),
+                 content: '',
+                 summary: '',
+                 status: 'FAILED',
+                 statusMessage: error instanceof Error ? error.message : 'A critical failure occurred during processing.'
+             };
+        }
+        
+        onProgress({ type: 'FILE_UPDATE', update: { id: finalFileObject.id, status: finalFileObject.status, statusMessage: finalFileObject.statusMessage }});
+        allProcessedFiles.push(finalFileObject);
     }
 
-    // 2. Index files with the external search service
-    const processedFiles: FileObject[] = await fileSearchService.syncClientFiles(
-        client,
-        filesFromDrive,
-        settings.fileSearchServiceApiKey
-    );
 
-    // 3. Update the client's file list in our database
-    const updatedClient = await databaseService.updateClientFiles(clientId, processedFiles);
+    // 4. Update the client's file list in our database with the final state
+    const updatedClient = await databaseService.updateClientFiles(clientId, allProcessedFiles);
 
     return { status: 'changed', client: updatedClient };
   },

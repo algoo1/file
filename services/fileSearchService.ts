@@ -1,101 +1,74 @@
+
 import { FileObject, Client } from '../types.ts';
-import { summarizeMultipleContents } from './geminiService.ts';
+import { summarizeSingleContent } from './geminiService.ts';
 
 // Mock database for the external File Search service
-const fileSearchIndex: Record<string, { files: Pick<FileObject, 'id' | 'name' | 'summary'>[] }> = {};
+// Using a Map for efficient per-file updates.
+const fileSearchIndex: Record<string, { files: Map<string, Pick<FileObject, 'id' | 'name' | 'summary'>> }> = {};
+
+
+const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 'name' | 'summary'>) => {
+    if (!fileSearchIndex[clientId]) {
+        fileSearchIndex[clientId] = { files: new Map() };
+    }
+    fileSearchIndex[clientId].files.set(file.id, file);
+    console.log(`Indexed file "${file.name}" for client ${clientId}. Index size: ${fileSearchIndex[clientId].files.size}`);
+};
 
 export const fileSearchService = {
   /**
    * Validates an API key.
-   * @param apiKey The API key to validate.
    */
   validateApiKey: async (apiKey: string): Promise<boolean> => {
     console.log(`Validating File Search API Key: ${apiKey ? 'present' : 'missing'}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    // Simple validation for mock: key must not be empty
+    await new Promise(resolve => setTimeout(resolve, 100)); // Faster simulation
     const isValid = !!apiKey.trim();
-    console.log(`API Key is ${isValid ? 'valid' : 'invalid'}`);
+    if (!isValid) console.warn(`API Key is invalid`);
     return isValid;
   },
 
   /**
-   * Wipes and re-indexes all files for a given client using a robust, chunked summarization process.
-   * @param client The client object.
-   * @param filesFromDrive The latest list of files from Google Drive.
-   * @param fileSearchApiKey The user's API key for this service.
-   * @returns The updated list of indexed files with their final statuses.
+   * Wipes the index for a given client. This is called at the start of a sync operation.
+   * @param clientId The ID of the client whose index should be cleared.
    */
-  syncClientFiles: async (
-    client: Client, 
-    filesFromDrive: Omit<FileObject, 'summary' | 'status'>[],
-    fileSearchApiKey: string
-  ): Promise<FileObject[]> => {
-    if (!(await fileSearchService.validateApiKey(fileSearchApiKey))) {
-        throw new Error("Invalid File Search API Key.");
+  clearIndexForClient: async (clientId: string): Promise<void> => {
+    if (fileSearchIndex[clientId]) {
+        delete fileSearchIndex[clientId];
+        console.log(`Cleared search index for client ${clientId}.`);
     }
-    
-    console.log(`Starting chunked sync for client ${client.name}. Wiping old index.`);
-    await new Promise(resolve => setTimeout(resolve, 200)); // Simulate wipe
-
-    const CHUNK_SIZE = 15; // Process up to 15 files per API call for reliability
-    const allProcessedFiles: FileObject[] = [];
-    
-    // Process files in manageable chunks to improve reliability and avoid API limits.
-    for (let i = 0; i < filesFromDrive.length; i += CHUNK_SIZE) {
-        const chunk = filesFromDrive.slice(i, i + CHUNK_SIZE);
-        console.log(`Processing chunk ${Math.floor(i / CHUNK_SIZE) + 1} with ${chunk.length} files...`);
-        
-        try {
-            const summaryMap = await summarizeMultipleContents(chunk, fileSearchApiKey);
-            
-            // Map the results from this chunk back to full file objects
-            const chunkProcessedFiles = chunk.map(driveFile => {
-                const result = summaryMap.get(driveFile.id);
-                if (result && result.summary && !result.error) {
-                    return {
-                        ...driveFile,
-                        summary: result.summary,
-                        status: 'COMPLETED',
-                        statusMessage: 'Successfully indexed.',
-                    } as FileObject;
-                } else {
-                    const errorMessage = result?.error || 'An unknown error occurred during indexing.';
-                    console.error(`Failed to summarize ${driveFile.name}: ${errorMessage}`);
-                    return {
-                        ...driveFile,
-                        summary: '',
-                        status: 'FAILED',
-                        statusMessage: errorMessage,
-                    } as FileObject;
-                }
-            });
-            allProcessedFiles.push(...chunkProcessedFiles);
-
-        } catch (chunkError) {
-            console.error(`A critical error occurred while processing a chunk for client ${client.name}.`, chunkError);
-            // If the entire API call for the chunk fails, mark all files in that chunk as failed.
-            const chunkFailedFiles = chunk.map(driveFile => ({
-                ...driveFile,
-                summary: '',
-                status: 'FAILED',
-                statusMessage: chunkError instanceof Error ? chunkError.message : 'The entire processing batch for this file failed.',
-            } as FileObject));
-            allProcessedFiles.push(...chunkFailedFiles);
-        }
-    }
-
-    // Update the mock index with only the successfully processed files from all chunks
-    const successfullyProcessed = allProcessedFiles
-        .filter(f => f.status === 'COMPLETED')
-        .map(({id, name, summary}) => ({id, name, summary}));
-
-    fileSearchIndex[client.id] = { files: successfullyProcessed };
-    
-    console.log(`Sync complete for client ${client.name}. Processed ${allProcessedFiles.length} files.`);
-    console.log("Current Index State:", fileSearchIndex);
-    
-    return allProcessedFiles;
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async
   },
+  
+  /**
+   * Processes and indexes a single file. It summarizes the content and updates the search index.
+   * @param client The client object.
+   * @param file The file data from Drive, including its content.
+   * @param fileSearchApiKey The user's API key for this service.
+   * @returns The fully processed file object with its final status.
+   */
+  indexSingleFile: async (
+    client: Client,
+    file: Omit<FileObject, 'summary' | 'status' | 'statusMessage'>,
+    fileSearchApiKey: string
+  ): Promise<FileObject> => {
+      
+    const result = await summarizeSingleContent(file, fileSearchApiKey);
+
+    const processedFile: FileObject = {
+      ...file,
+      summary: result.summary || '',
+      status: result.error ? 'FAILED' : 'COMPLETED',
+      statusMessage: result.error || 'Successfully indexed.',
+    };
+    
+    // Only add successfully processed files to the live search index.
+    if (processedFile.status === 'COMPLETED') {
+        addOrUpdateFileInIndex(client.id, processedFile);
+    }
+
+    return processedFile;
+  },
+
 
   /**
    * Queries the indexed data for a specific client.
@@ -110,18 +83,18 @@ export const fileSearchService = {
         }
 
         console.log(`Querying data for client ${client.name} with query: "${query}"`);
-        // In a real API: POST /query { clientId, query }
         await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
 
         const clientIndex = fileSearchIndex[client.id];
-        if (!clientIndex || clientIndex.files.length === 0) {
+        if (!clientIndex || clientIndex.files.size === 0) {
             return "There is no data indexed for this client. Please check the Google Drive sync.";
         }
-
-        // The context is built from the *indexed* summaries.
-        const context = clientIndex.files.map(f => `File: ${f.name}\n${f.summary}`).join('\n\n---\n\n');
         
-        // Safeguard: Truncate context to avoid exceeding model token limits.
+        // Build context from the indexed summaries stored in the Map.
+        const context = Array.from(clientIndex.files.values())
+            .map(f => `File: ${f.name}\n${f.summary}`)
+            .join('\n\n---\n\n');
+        
         const MAX_CONTEXT_LENGTH = 800000;
         let truncatedContext = context;
         if (truncatedContext.length > MAX_CONTEXT_LENGTH) {
@@ -147,12 +120,10 @@ User Query: "${query}"
 Answer:
 `;
         
-        // Dynamically import the library only when it's needed to avoid startup crashes.
         const { GoogleGenAI } = await import("@google/genai");
-        // CRITICAL FIX: Use the fileSearchApiKey provided by the user from settings.
         const ai = new GoogleGenAI({ apiKey: fileSearchApiKey });
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash', // Standardize on flash model for consistency and robustness
+            model: 'gemini-2.5-flash',
             contents: prompt,
         });
         return response.text;
