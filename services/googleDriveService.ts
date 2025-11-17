@@ -1,4 +1,3 @@
-
 import { FileObject } from '../types.ts';
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
@@ -154,7 +153,7 @@ export const googleDriveService = {
    * @param folderUrl The URL of the Google Drive folder.
    * @returns A promise that resolves to an array of file metadata objects.
    */
-  getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string }[]> => {
+  getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string; modifiedTime: string }[]> => {
     const gapi = window.gapi as any;
     if (!gapi?.client?.drive) {
         throw new Error("GAPI client not initialized. Please connect to Google Drive.");
@@ -168,7 +167,7 @@ export const googleDriveService = {
     
     const response = await gapi.client.drive.files.list({
       q: `'${folderId}' in parents and trashed = false and (mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp')`,
-      fields: 'files(id, name, mimeType)',
+      fields: 'files(id, name, mimeType, modifiedTime)',
       pageSize: 500 // Fetch up to 500 files
     });
 

@@ -11,7 +11,6 @@ import { CheckCircleIcon } from './icons/CheckCircleIcon.tsx';
 import { XCircleIcon } from './icons/XCircleIcon.tsx';
 import { ClockIcon } from './icons/ClockIcon.tsx';
 
-
 interface FileManagerProps {
   client: Client;
   isGoogleDriveConnected: boolean;
@@ -41,6 +40,18 @@ const statusIndicatorClasses = (status: SyncedFile['status']) => {
     }
 };
 
+const formatDate = (isoString?: string) => {
+    if (!isoString) return 'N/A';
+    try {
+        return new Date(isoString).toLocaleString(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        });
+    } catch (e) {
+        return 'Invalid Date';
+    }
+};
+
 const TagPill: React.FC<{tag: Tag; onRemove: (tagId: string) => void}> = ({ tag, onRemove }) => (
     <div className="flex items-center bg-gray-600 text-gray-200 text-xs font-semibold px-2 py-1 rounded-full">
         <span>{tag.name}</span>
@@ -62,7 +73,6 @@ const FileTypeIcon: React.FC<{type: SyncedFile['type']; source: SyncedFile['sour
         default: return null;
     }
 };
-
 
 const GoogleDriveManager: React.FC<{
     client: Client;
@@ -280,27 +290,27 @@ const FileManager: React.FC<FileManagerProps> = ({
       const totalAirtableRecords = airtableRecords.length;
 
       if (isSyncing) {
-          return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+          const processingRecords = airtableRecords.filter(r => r.status === 'SYNCING' || r.status === 'INDEXING');
+          if (processingRecords.length > 0) {
+              return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+          }
+      }
+      
+      if (airtableRecords.some(r => r.status === 'FAILED')) {
+            return { status: 'FAILED', text: 'Sync failed', icon: <XCircleIcon className="w-5 h-5 text-red-500" /> };
       }
 
-      if (totalAirtableRecords > 0) {
-          if (airtableRecords.some(r => r.status === 'FAILED')) {
-              return { status: 'FAILED', text: 'Sync failed', icon: <XCircleIcon className="w-5 h-5 text-red-500" /> };
-          }
-          if (airtableRecords.every(r => r.status === 'COMPLETED')) {
-              const recordText = totalAirtableRecords === 1 ? 'record' : 'records';
-              return { status: 'COMPLETED', text: `Synced (${totalAirtableRecords} ${recordText})`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
-          }
-           // Some files are still being processed from a previous onProgress update
-          return { status: 'SYNCING', text: 'Processing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+      if (totalAirtableRecords > 0 && airtableRecords.every(r => r.status === 'COMPLETED')) {
+          const recordText = totalAirtableRecords === 1 ? 'record' : 'records';
+          return { status: 'COMPLETED', text: `Synced (${totalAirtableRecords} ${recordText})`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
       }
       
-      // We can't distinguish between "never synced" and "synced and found 0 records" without a dedicated timestamp on the client.
-      // However, we can confirm a successful sync *did* run if there are other files present (from Drive).
-      if (client.synced_files.length > 0 && client.synced_files.every(f => f.status === 'COMPLETED')) {
+      // This state occurs if a sync ran but found 0 records
+      const wasSyncAttempted = client.synced_files.length > 0 && client.synced_files.every(f => f.status === 'COMPLETED' || f.status === 'FAILED');
+      if (wasSyncAttempted && totalAirtableRecords === 0) {
           return { status: 'COMPLETED', text: `Synced (0 records)`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
       }
-      
+
       // "Ready to Sync" is a clearer initial state than "Pending".
       return { status: 'IDLE', text: 'Ready to Sync', icon: <ClockIcon className="w-5 h-5 text-gray-400" /> };
   }
@@ -498,6 +508,16 @@ const FileManager: React.FC<FileManagerProps> = ({
                          <div>
                             <p className="font-semibold text-gray-400">Status</p>
                             <p className={`font-semibold capitalize ${statusIndicatorClasses(viewingFile.status)}`}>{viewingFile.status}</p>
+                        </div>
+                        {viewingFile.source === 'GOOGLE_DRIVE' && viewingFile.source_modified_at && (
+                             <div>
+                                <p className="font-semibold text-gray-400">Source Modified</p>
+                                <p className="text-gray-200">{formatDate(viewingFile.source_modified_at)}</p>
+                            </div>
+                        )}
+                        <div>
+                            <p className="font-semibold text-gray-400">Last Synced</p>
+                            <p className="text-gray-200">{formatDate(viewingFile.last_synced_at)}</p>
                         </div>
                         {viewingFile.status_message && (
                              <div>

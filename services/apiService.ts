@@ -73,7 +73,14 @@ export const apiService = {
             if (mimeType.startsWith('image/')) return 'image';
             return 'pdf'; // Default for PDF, GDoc, text
         };
-        allSourceFilesMeta.push(...driveFilesMeta.map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType, type: getFileType(f.mimeType), source: 'GOOGLE_DRIVE' as const })));
+        allSourceFilesMeta.push(...driveFilesMeta.map(f => ({ 
+            id: f.id, 
+            name: f.name, 
+            mimeType: f.mimeType, 
+            type: getFileType(f.mimeType), 
+            source: 'GOOGLE_DRIVE' as const,
+            source_modified_at: f.modifiedTime,
+        })));
     }
 
     if (isAirtableConfigured) {
@@ -89,6 +96,7 @@ export const apiService = {
         status_message: 'In queue...',
         type: f.type,
         source: f.source,
+        source_modified_at: f.source_modified_at,
     }));
 
     onProgress({ type: 'INITIAL_LIST', files: initialSyncedFiles });
@@ -131,7 +139,7 @@ export const apiService = {
                  };
             }
             
-            onProgress({ type: 'FILE_UPDATE', update: { source_item_id: finalFileObject.id, status: finalFileObject.status, status_message: finalFileObject.statusMessage, type: finalFileObject.type }});
+            onProgress({ type: 'FILE_UPDATE', update: { source_item_id: finalFileObject.id, status: finalFileObject.status, status_message: finalFileObject.statusMessage, type: finalFileObject.type, source_modified_at: finalFileObject.source_modified_at }});
             return finalFileObject;
         }));
 

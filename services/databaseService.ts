@@ -139,6 +139,7 @@ export const databaseService = {
             source: f.source,
             summary: f.summary,
             last_synced_at: new Date().toISOString(),
+            source_modified_at: f.source_modified_at,
         }));
         
         const { data, error: insertError } = await supabase

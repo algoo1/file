@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { Client, SystemSettings, SyncedFile } from './types.ts';
+import { Client, SystemSettings, SyncedFile, Tag } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import { airtableService } from './services/airtableService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
@@ -236,13 +235,30 @@ const App: React.FC = () => {
       );
     };
 
-
     try {
         const result = await apiService.syncDataSource(clientId, onProgress);
         handleUpdateClientState(result.client);
     } catch (error) {
-        console.error("Manual sync failed:", error);
-        alert(`Failed to sync data source: ${error instanceof Error ? error.message : String(error)}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("Manual sync failed:", errorMessage);
+        alert(`Failed to sync data source: ${errorMessage}`);
+        
+        // This fixes the "stuck pending" UI state on a sync failure.
+        setClients(prevClients => 
+            prevClients.map(c => {
+                if (c.id === clientId) {
+                    // Mark all non-completed files as failed.
+                    const updatedFiles = c.synced_files.map(f => {
+                        if (f.status !== 'COMPLETED') {
+                             return { ...f, status: 'FAILED' as const, status_message: `Sync failed: ${errorMessage}` };
+                        }
+                        return f;
+                    });
+                    return { ...c, synced_files: updatedFiles };
+                }
+                return c;
+            })
+        );
     } finally {
         setIsSyncingClient(null);
     }

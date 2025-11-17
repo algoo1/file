@@ -12,6 +12,7 @@ export interface SyncedFile {
   source: 'GOOGLE_DRIVE' | 'AIRTABLE';
   summary?: string;
   last_synced_at?: string; // ISO 8601 timestamp
+  source_modified_at?: string; // ISO 8601 timestamp from the source
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +28,7 @@ export interface FileObject {
     status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
     statusMessage?: string;
     source: 'GOOGLE_DRIVE' | 'AIRTABLE';
+    source_modified_at?: string;
 }
 
 export interface Tag {
