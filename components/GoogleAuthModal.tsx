@@ -16,8 +16,8 @@ const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
   isConnected,
   onConnect,
 }) => {
-  const [apiKey, setApiKey] = useState(initialSettings.googleApiKey);
-  const [clientId, setClientId] = useState(initialSettings.googleClientId);
+  const [apiKey, setApiKey] = useState(initialSettings.google_api_key || '');
+  const [clientId, setClientId] = useState(initialSettings.google_client_id || '');
   const [isConnecting, setIsConnecting] = useState(false);
   const [copiedOrigin1, setCopiedOrigin1] = useState(false);
   const [copiedOrigin2, setCopiedOrigin2] = useState(false);

@@ -47,9 +47,9 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
   }, [onSearch, query, selectedImage]);
   
   const hasContentToSearch = query.trim() || selectedImage;
-  const hasDataSource = client.googleDriveFolderUrl || 
-                        (client.airtableApiKey && client.airtableBaseId && client.airtableTableId) ||
-                        (client.airtableAccessToken && client.airtableBaseId && client.airtableTableId);
+  const hasDataSource = client.google_drive_folder_url || 
+                        (client.airtable_api_key && client.airtable_base_id && client.airtable_table_id) ||
+                        (client.airtable_access_token && client.airtable_base_id && client.airtable_table_id);
   const canSearch = !isLoading && hasContentToSearch && hasDataSource;
 
   return (

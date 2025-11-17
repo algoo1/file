@@ -101,11 +101,11 @@ export const airtableService = {
       
       const tokenData = await response.json();
       return {
-          airtableAccessToken: tokenData.access_token,
-          airtableRefreshToken: tokenData.refresh_token,
-          airtableTokenExpiresAt: Date.now() + (tokenData.expires_in * 1000),
+          airtable_access_token: tokenData.access_token,
+          airtable_refresh_token: tokenData.refresh_token,
+          airtable_token_expires_at: new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString(),
           // Clear PAT on successful OAuth
-          airtableApiKey: null,
+          airtable_api_key: null,
       };
   },
 
@@ -115,26 +115,26 @@ export const airtableService = {
    * @param airtableClientId The system-wide Airtable Client ID.
    * @returns The valid auth token (could be PAT or access token).
    */
-  getAuthToken: async (client: Client, airtableClientId: string): Promise<string> => {
+  getAuthToken: async (client: Client, airtableClientId: string | null): Promise<string> => {
       // Prioritize OAuth access token
-      if (client.airtableAccessToken) {
-          if (client.airtableTokenExpiresAt && Date.now() >= client.airtableTokenExpiresAt) {
+      if (client.airtable_access_token) {
+          if (client.airtable_token_expires_at && new Date() >= new Date(client.airtable_token_expires_at)) {
               // TODO: Implement token refresh logic if needed
               console.warn("Airtable access token has expired. Re-authentication is required.");
               throw new Error("Airtable token expired. Please reconnect.");
           }
-          return client.airtableAccessToken;
+          return client.airtable_access_token;
       }
       // Fallback to Personal Access Token
-      if (client.airtableApiKey) {
-          return client.airtableApiKey;
+      if (client.airtable_api_key) {
+          return client.airtable_api_key;
       }
       throw new Error("No Airtable authentication method configured for this client.");
   },
 
-  getRecords: async (client: Client, airtableClientId: string): Promise<{ id: string, name: string }[]> => {
+  getRecords: async (client: Client, airtableClientId: string | null): Promise<{ id: string, name: string }[]> => {
     const authToken = await airtableService.getAuthToken(client, airtableClientId);
-    const url = `https://api.airtable.com/v0/${client.airtableBaseId}/${client.airtableTableId}`;
+    const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}`;
     try {
       const response = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
       if (!response.ok) {
@@ -149,9 +149,9 @@ export const airtableService = {
     }
   },
 
-  getRecordContent: async (client: Client, airtableClientId: string, recordId: string): Promise<string> => {
+  getRecordContent: async (client: Client, airtableClientId: string | null, recordId: string): Promise<string> => {
     const authToken = await airtableService.getAuthToken(client, airtableClientId);
-    const url = `https://api.airtable.com/v0/${client.airtableBaseId}/${client.airtableTableId}/${recordId}`;
+    const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}/${recordId}`;
     try {
       const response = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
       if (!response.ok) {

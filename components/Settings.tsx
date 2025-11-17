@@ -18,19 +18,19 @@ const Settings: React.FC<SettingsProps> = ({
   onOpenGoogleAuthModal,
   onOpenAirtableAuthModal,
 }) => {
-  const [localApiKey, setLocalApiKey] = useState(settings?.fileSearchServiceApiKey || '');
+  const [localApiKey, setLocalApiKey] = useState(settings?.file_search_service_api_key || '');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
-    setLocalApiKey(settings?.fileSearchServiceApiKey || '');
-  }, [settings?.fileSearchServiceApiKey]);
+    setLocalApiKey(settings?.file_search_service_api_key || '');
+  }, [settings?.file_search_service_api_key]);
 
   const handleSave = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      await onSave({ fileSearchServiceApiKey: localApiKey });
+      await onSave({ file_search_service_api_key: localApiKey });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
@@ -40,7 +40,7 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const hasUnsavedChanges = localApiKey !== (settings?.fileSearchServiceApiKey || '');
+  const hasUnsavedChanges = localApiKey !== (settings?.file_search_service_api_key || '');
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg">
@@ -52,7 +52,7 @@ const Settings: React.FC<SettingsProps> = ({
         <div>
           <label htmlFor="apiKey" className="block text-sm font-medium text-gray-400 mb-1 flex items-center justify-between">
             <span>File Search Service API Key</span>
-            {settings?.fileSearchServiceApiKey && !hasUnsavedChanges && (
+            {settings?.file_search_service_api_key && !hasUnsavedChanges && (
                 <span className="text-green-400 flex items-center gap-1 text-xs" title="API Key is saved">
                     <CheckIcon className="w-4 h-4" />
                     Saved
@@ -65,7 +65,7 @@ const Settings: React.FC<SettingsProps> = ({
               type="password"
               value={localApiKey}
               onChange={(e) => setLocalApiKey(e.target.value)}
-              placeholder="Enter your Service API Key"
+              placeholder="Enter your Gemini API Key"
               className="flex-grow w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
             />
             <button
@@ -85,24 +85,24 @@ const Settings: React.FC<SettingsProps> = ({
                 <button
                     onClick={onOpenGoogleAuthModal}
                     className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
-                        settings?.isGoogleDriveConnected 
+                        settings?.is_google_drive_connected 
                         ? 'bg-green-600/80 text-white' 
                         : 'bg-gray-700 hover:bg-gray-600 text-white'
                     }`}
                 >
                     <DriveIcon className="w-5 h-5" />
-                    {settings?.isGoogleDriveConnected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
+                    {settings?.is_google_drive_connected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
                 </button>
                 <button
                     onClick={onOpenAirtableAuthModal}
                     className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
-                        settings?.isAirtableConnected 
+                        settings?.is_airtable_connected 
                         ? 'bg-green-600/80 text-white' 
                         : 'bg-gray-700 hover:bg-gray-600 text-white'
                     }`}
                 >
                     <AirtableIcon className="w-5 h-5" />
-                    {settings?.isAirtableConnected ? 'Airtable Integration Setup' : 'Setup Airtable Integration'}
+                    {settings?.is_airtable_connected ? 'Airtable Integration Setup' : 'Setup Airtable Integration'}
                 </button>
             </div>
         </div>

@@ -1,106 +1,152 @@
+import { supabase } from './supabaseClient.ts';
 import { Client, SystemSettings, SyncedFile, FileObject, Tag } from '../types.ts';
 
-// Mock UUID generator
-const uuidv4 = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-});
-
-// In-memory store
-let settings: SystemSettings = {
-    fileSearchServiceApiKey: '',
-    googleApiKey: '',
-    googleClientId: '',
-    googleClientSecret: '', // Kept for backend compatibility but not used in frontend flow
-    isGoogleDriveConnected: false,
-    airtableClientId: '',
-    isAirtableConnected: false,
-};
-
-let clients: Client[] = [];
-
-// This service mimics a database or a persistent storage layer.
+// This service interacts directly with the Supabase database.
 export const databaseService = {
     // Settings Management
     getSettings: async (): Promise<SystemSettings> => {
-        await new Promise(res => setTimeout(res, 50)); // simulate async
-        return { ...settings };
+        const { data, error } = await supabase
+            .from('settings')
+            .select('*')
+            .eq('id', 1)
+            .single();
+        if (error) {
+            console.error('Error fetching settings:', error);
+            // On first run, the settings table might be empty.
+            // Let's create a default entry.
+            if (error.code === 'PGRST116') {
+                 console.log("No settings found, creating default entry.");
+                 const { data: newData, error: newError } = await supabase
+                    .from('settings')
+                    .insert({ id: 1, file_search_service_api_key: '' })
+                    .select()
+                    .single();
+                if (newError) throw newError;
+                return newData;
+            }
+            throw error;
+        }
+        return data;
     },
-    saveSettings: async (newSettings: Partial<SystemSettings>): Promise<SystemSettings> => {
-        await new Promise(res => setTimeout(res, 50));
-        settings = { ...settings, ...newSettings };
-        return { ...settings };
+    saveSettings: async (newSettings: Partial<Omit<SystemSettings, 'id'>>): Promise<SystemSettings> => {
+        const { data, error } = await supabase
+            .from('settings')
+            .update({ ...newSettings, updated_at: new Date().toISOString() })
+            .eq('id', 1)
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
     },
 
-    // Client Management
+    // Client Management with Relations
     getClients: async (): Promise<Client[]> => {
-        await new Promise(res => setTimeout(res, 50));
-        return [...clients];
+        const { data, error } = await supabase
+            .from('clients')
+            .select(`
+                *,
+                synced_files (*),
+                tags (*)
+            `)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+        return data as Client[];
     },
     getClientById: async (id: string): Promise<Client | undefined> => {
-        await new Promise(res => setTimeout(res, 50));
-        return clients.find(c => c.id === id);
+        const { data, error } = await supabase
+            .from('clients')
+            .select(`
+                *,
+                synced_files (*),
+                tags (*)
+            `)
+            .eq('id', id)
+            .single();
+        
+        if (error) {
+            if(error.code === 'PGRST116') return undefined; // Not found is not an error
+            throw error;
+        }
+        return data as Client;
     },
     addClient: async (name: string): Promise<Client> => {
-        await new Promise(res => setTimeout(res, 50));
-        const newClient: Client = {
-            id: uuidv4(),
-            name,
-            apiKey: `sk-${uuidv4().replace(/-/g, '')}`,
-            googleDriveFolderUrl: null,
-            // PAT fields
-            airtableApiKey: null,
-            airtableBaseId: null,
-            airtableTableId: null,
-            // OAuth fields
-            airtableAccessToken: null,
-            airtableRefreshToken: null,
-            airtableTokenExpiresAt: null,
-            syncedFiles: [],
-            tags: [],
-            syncInterval: 'MANUAL',
-        };
-        clients = [...clients, newClient];
-        return { ...newClient };
+        const apiKey = `sk-${crypto.randomUUID().replace(/-/g, '')}`;
+        const { data, error } = await supabase
+            .from('clients')
+            .insert({ name, api_key: apiKey })
+            .select()
+            .single();
+
+        if (error) throw error;
+        // Return a fully formed Client object with empty relations
+        return { ...data, synced_files: [], tags: [] };
     },
     updateClient: async (id: string, updates: Partial<Omit<Client, 'id'>>): Promise<Client> => {
-        await new Promise(res => setTimeout(res, 50));
-        let clientToUpdate = clients.find(c => c.id === id);
-        if (!clientToUpdate) {
-            throw new Error("Client not found");
-        }
-        clientToUpdate = { ...clientToUpdate, ...updates };
-        clients = clients.map(c => c.id === id ? clientToUpdate : c);
-        return { ...clientToUpdate };
+        const { data, error } = await supabase
+            .from('clients')
+            .update({ ...updates, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select()
+            .single();
+            
+        if (error) throw error;
+
+        // Fetch the full client with relations to return a consistent object
+        const fullClient = await databaseService.getClientById(id);
+        if(!fullClient) throw new Error("Failed to fetch client after update.");
+        return fullClient;
     },
     
     // Tag Management (within a client)
-    addTagToClient: async(clientId: string, tagName: string): Promise<Client> => {
-        const client = await databaseService.getClientById(clientId);
-        if (!client) throw new Error("Client not found");
-        const newTag: Tag = { id: uuidv4(), name: tagName };
-        const updatedTags = [...client.tags, newTag];
-        return await databaseService.updateClient(clientId, { tags: updatedTags });
+    addTagToClient: async(clientId: string, tagName: string): Promise<Tag> => {
+        const { data, error } = await supabase
+            .from('tags')
+            .insert({ client_id: clientId, name: tagName })
+            .select()
+            .single();
+        if(error) throw error;
+        return data;
     },
-
-    removeTagFromClient: async(clientId: string, tagId: string): Promise<Client> => {
-        const client = await databaseService.getClientById(clientId);
-        if (!client) throw new Error("Client not found");
-        const updatedTags = client.tags.filter(t => t.id !== tagId);
-        return await databaseService.updateClient(clientId, { tags: updatedTags });
+    removeTagFromClient: async(tagId: string): Promise<void> => {
+        const { error } = await supabase
+            .from('tags')
+            .delete()
+            .eq('id', tagId);
+        if (error) throw error;
     },
     
     // File Management (within a client)
-    updateClientFiles: async (clientId: string, files: FileObject[]): Promise<Client> => {
-        const syncedFiles: SyncedFile[] = files.map(f => ({
-            id: f.id,
+    updateClientFiles: async (clientId: string, files: FileObject[]): Promise<SyncedFile[]> => {
+        // First, delete all existing files for this client to ensure a clean slate.
+        const { error: deleteError } = await supabase
+            .from('synced_files')
+            .delete()
+            .eq('client_id', clientId);
+        
+        if (deleteError) throw deleteError;
+
+        if (files.length === 0) return [];
+
+        // Now, insert the new batch of files.
+        const filesToInsert = files.map(f => ({
+            client_id: clientId,
+            source_item_id: f.id,
             name: f.name,
             status: f.status,
-            statusMessage: f.statusMessage,
+            status_message: f.statusMessage,
             type: f.type,
             source: f.source,
+            summary: f.summary,
+            last_synced_at: new Date().toISOString(),
         }));
-        return await databaseService.updateClient(clientId, { syncedFiles });
+        
+        const { data, error: insertError } = await supabase
+            .from('synced_files')
+            .insert(filesToInsert)
+            .select();
+        
+        if (insertError) throw insertError;
+        return data;
     }
 };

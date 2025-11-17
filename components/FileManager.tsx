@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Client, SyncedFile, Tag } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
-import { CheckIcon } from './icons/CheckIcon.tsx';
 import { EyeIcon } from './icons/EyeIcon.tsx';
 import { ImageIcon } from './icons/ImageIcon.tsx';
 import { SheetIcon } from './icons/SheetIcon.tsx';
 import { DocumentIcon } from './icons/DocumentIcon.tsx';
 import { AirtableIcon } from './icons/AirtableIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
+import { CheckCircleIcon } from './icons/CheckCircleIcon.tsx';
+import { XCircleIcon } from './icons/XCircleIcon.tsx';
+import { ClockIcon } from './icons/ClockIcon.tsx';
 
 
 interface FileManagerProps {
@@ -69,12 +71,12 @@ const GoogleDriveManager: React.FC<{
     onSetFolderUrl: (clientId: string, url: string) => Promise<void>;
     onSyncNow: (clientId: string) => Promise<void>;
 }> = ({ client, isSyncing, isGoogleDriveConnected, onSetFolderUrl, onSyncNow }) => {
-    const [folderUrl, setFolderUrl] = useState(client.googleDriveFolderUrl || '');
+    const [folderUrl, setFolderUrl] = useState(client.google_drive_folder_url || '');
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        setFolderUrl(client.googleDriveFolderUrl || '');
-    }, [client.googleDriveFolderUrl, client.id]);
+        setFolderUrl(client.google_drive_folder_url || '');
+    }, [client.google_drive_folder_url, client.id]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -95,7 +97,7 @@ const GoogleDriveManager: React.FC<{
         return <p className="text-gray-500 text-sm text-center py-4">Connect to Google Drive in Settings to enable this data source.</p>;
     }
 
-    const hasUnchangedUrl = folderUrl.trim() === (client.googleDriveFolderUrl || '');
+    const hasUnchangedUrl = folderUrl.trim() === (client.google_drive_folder_url || '');
 
     return (
         <form onSubmit={handleSubmit} className="flex gap-2">
@@ -126,16 +128,16 @@ const AirtableManager: React.FC<{
     onInitiateAirtableOAuth: (clientId: string) => void;
     onSyncNow: (clientId: string) => Promise<void>;
 }> = ({ client, isSyncing, isAirtableSetUp, onSetAirtableDetails, onInitiateAirtableOAuth, onSyncNow }) => {
-    const [apiKey, setApiKey] = useState(client.airtableApiKey || '');
-    const [baseId, setBaseId] = useState(client.airtableBaseId || '');
-    const [tableId, setTableId] = useState(client.airtableTableId || '');
+    const [apiKey, setApiKey] = useState(client.airtable_api_key || '');
+    const [baseId, setBaseId] = useState(client.airtable_base_id || '');
+    const [tableId, setTableId] = useState(client.airtable_table_id || '');
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        setApiKey(client.airtableApiKey || '');
-        setBaseId(client.airtableBaseId || '');
-        setTableId(client.airtableTableId || '');
-    }, [client.id, client.airtableApiKey, client.airtableBaseId, client.airtableTableId]);
+        setApiKey(client.airtable_api_key || '');
+        setBaseId(client.airtable_base_id || '');
+        setTableId(client.airtable_table_id || '');
+    }, [client.id, client.airtable_api_key, client.airtable_base_id, client.airtable_table_id]);
 
     const handlePatSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -143,16 +145,16 @@ const AirtableManager: React.FC<{
         setIsSaving(true);
         try {
             const details = { 
-                airtableApiKey: apiKey.trim(), 
-                airtableBaseId: baseId.trim(), 
-                airtableTableId: tableId.trim(),
+                airtable_api_key: apiKey.trim(), 
+                airtable_base_id: baseId.trim(), 
+                airtable_table_id: tableId.trim(),
                 // Clear OAuth tokens if switching to PAT
-                airtableAccessToken: null,
-                airtableRefreshToken: null,
-                airtableTokenExpiresAt: null,
+                airtable_access_token: null,
+                airtable_refresh_token: null,
+                airtable_token_expires_at: null,
             };
             await onSetAirtableDetails(client.id, details);
-             if (details.airtableApiKey && details.airtableBaseId && details.airtableTableId) {
+             if (details.airtable_api_key && details.airtable_base_id && details.airtable_table_id) {
                 await onSyncNow(client.id);
             }
         } finally {
@@ -164,17 +166,17 @@ const AirtableManager: React.FC<{
         return <p className="text-gray-500 text-sm text-center py-4">Set up Airtable integration in Settings to enable this data source.</p>;
     }
 
-    const hasPatUnchangedDetails = apiKey.trim() === (client.airtableApiKey || '') 
-        && baseId.trim() === (client.airtableBaseId || '') 
-        && tableId.trim() === (client.airtableTableId || '');
+    const hasPatUnchangedDetails = apiKey.trim() === (client.airtable_api_key || '') 
+        && baseId.trim() === (client.airtable_base_id || '') 
+        && tableId.trim() === (client.airtable_table_id || '');
     
     const canSavePat = !hasPatUnchangedDetails && apiKey && baseId && tableId;
-    const isConnectedViaOAuth = !!client.airtableAccessToken;
+    const isConnectedViaOAuth = !!client.airtable_access_token;
 
     const handleOAuthConnect = async () => {
         // First, save any changes to base/table IDs
-        if (baseId.trim() !== (client.airtableBaseId || '') || tableId.trim() !== (client.airtableTableId || '')) {
-            await onSetAirtableDetails(client.id, { airtableBaseId: baseId.trim(), airtableTableId: tableId.trim() });
+        if (baseId.trim() !== (client.airtable_base_id || '') || tableId.trim() !== (client.airtable_table_id || '')) {
+            await onSetAirtableDetails(client.id, { airtable_base_id: baseId.trim(), airtable_table_id: tableId.trim() });
         }
         onInitiateAirtableOAuth(client.id);
     };
@@ -269,16 +271,38 @@ const FileManager: React.FC<FileManagerProps> = ({
     onSetSyncInterval(client.id, interval);
   };
   
-  const hasDataSource = client.googleDriveFolderUrl || 
-                        (client.airtableApiKey && client.airtableBaseId && client.airtableTableId) ||
-                        (client.airtableAccessToken && client.airtableBaseId && client.airtableTableId);
+  const hasDataSource = client.google_drive_folder_url || 
+                        (client.airtable_api_key && client.airtable_base_id && client.airtable_table_id) ||
+                        (client.airtable_access_token && client.airtable_base_id && client.airtable_table_id);
+
+  const getAirtableAggregateStatus = (): { status: 'COMPLETED' | 'FAILED' | 'SYNCING' | 'IDLE', text: string, icon: React.ReactNode } => {
+      const airtableRecords = client.synced_files.filter(f => f.source === 'AIRTABLE');
+      
+      if (airtableRecords.length > 0) {
+          if (airtableRecords.some(r => r.status === 'FAILED')) {
+              return { status: 'FAILED', text: 'Sync failed', icon: <XCircleIcon className="w-5 h-5 text-red-500" /> };
+          }
+          if (airtableRecords.every(r => r.status === 'COMPLETED')) {
+              return { status: 'COMPLETED', text: 'Synced', icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
+          }
+          // If it reaches here, some are syncing, indexing, or still idle within a sync operation
+          return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+      }
+      
+      // No records processed yet
+      if (isSyncing) {
+          return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+      }
+      
+      return { status: 'IDLE', text: 'Pending', icon: <ClockIcon className="w-5 h-5 text-gray-400" /> };
+  }
 
   return (
     <>
         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg flex flex-col">
             <h2 className="text-lg font-semibold mb-3 text-white">Data Sources</h2>
 
-            <details className="bg-gray-900/50 rounded-lg border border-gray-700 mb-3" open={!!client.googleDriveFolderUrl}>
+            <details className="bg-gray-900/50 rounded-lg border border-gray-700 mb-3" open={!!client.google_drive_folder_url}>
                 <summary className="p-3 cursor-pointer font-semibold text-gray-200 flex items-center gap-2">
                     <DriveIcon className="w-5 h-5 text-blue-400" />
                     Google Drive
@@ -294,7 +318,7 @@ const FileManager: React.FC<FileManagerProps> = ({
                 </div>
             </details>
             
-            <details className="bg-gray-900/50 rounded-lg border border-gray-700" open={!!client.airtableBaseId}>
+            <details className="bg-gray-900/50 rounded-lg border border-gray-700" open={!!client.airtable_base_id}>
                 <summary className="p-3 cursor-pointer font-semibold text-gray-200 flex items-center gap-2">
                     <AirtableIcon className="w-5 h-5 text-yellow-400" />
                     Airtable
@@ -328,7 +352,7 @@ const FileManager: React.FC<FileManagerProps> = ({
                 </label>
                 <select
                     id="sync-interval"
-                    value={client.syncInterval}
+                    value={client.sync_interval}
                     onChange={handleIntervalChange}
                     className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600 disabled:opacity-50"
                     disabled={!hasDataSource || isSyncing}
@@ -343,31 +367,75 @@ const FileManager: React.FC<FileManagerProps> = ({
             </div>
             
             <div className="border-t border-gray-700 pt-4 mt-4">
-                 <h3 className="text-md font-semibold text-gray-300 mb-2">Synced Files</h3>
-                 <div className="max-h-60 overflow-y-auto pr-1">
-                    {isSyncing && client.syncedFiles.length === 0 && (
-                        <p className="text-gray-500 text-sm text-center py-4">Syncing data...</p>
-                    )}
-                    {!isSyncing && client.syncedFiles.length === 0 && (
-                         <p className="text-gray-500 text-sm text-center py-4">No files found. Connect a source and click "Sync Now".</p>
-                    )}
-                    {client.syncedFiles.length > 0 && (
-                        <ul className="space-y-2">
-                        {client.syncedFiles.map(file => (
-                            <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
-                                <div className="flex items-center min-w-0">
-                                    <FileTypeIcon type={file.type} source={file.source} />
-                                    <span className="truncate text-gray-300" title={file.name}>
-                                        {file.name}
-                                    </span>
+                 <h3 className="text-md font-semibold text-gray-300 mb-2">Synced Data</h3>
+                 <div className="max-h-60 overflow-y-auto pr-1 space-y-4">
+                    
+                    {/* Airtable Section */}
+                    {client.airtable_base_id && client.airtable_table_id && (
+                        <div>
+                            <div className="bg-gray-700/50 p-2 rounded-md text-sm">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center min-w-0">
+                                        <AirtableIcon className="w-5 h-5 text-yellow-400 mr-3 flex-shrink-0" />
+                                        <span className="truncate text-gray-300" title={client.airtable_table_id}>
+                                            Table: {client.airtable_table_id}
+                                        </span>
+                                    </div>
+                                    {(() => {
+                                        const { text, icon } = getAirtableAggregateStatus();
+                                        return (
+                                            <div className="flex items-center gap-2 text-gray-400" title={text}>
+                                                <span>{text}</span>
+                                                {icon}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
-                                <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
-                                    <EyeIcon className="w-5 h-5" />
-                                </button>
-                            </li>
-                        ))}
-                        </ul>
+                            </div>
+                        </div>
                     )}
+                    
+                    {/* Google Drive Section */}
+                    {client.google_drive_folder_url && (
+                        <div>
+                            {(() => {
+                                const driveFiles = client.synced_files.filter(f => f.source === 'GOOGLE_DRIVE');
+                                
+                                if (isSyncing && driveFiles.length === 0) {
+                                    return <p className="text-gray-500 text-sm text-center py-2">Scanning Google Drive for files...</p>;
+                                }
+                                if (!isSyncing && driveFiles.length === 0) {
+                                    return <p className="text-gray-500 text-sm text-center py-2">No files synced from Google Drive yet.</p>;
+                                }
+                                if (driveFiles.length > 0) {
+                                    return (
+                                        <ul className="space-y-2">
+                                            {driveFiles.map(file => (
+                                                <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
+                                                    <div className="flex items-center min-w-0">
+                                                        <FileTypeIcon type={file.type} source={file.source} />
+                                                        <span className="truncate text-gray-300" title={file.name}>
+                                                            {file.name}
+                                                        </span>
+                                                    </div>
+                                                    <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
+                                                        <EyeIcon className="w-5 h-5" />
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    );
+                                }
+                                return null;
+                            })()}
+                        </div>
+                    )}
+
+                    {/* General Empty State */}
+                    {!client.airtable_base_id && !client.google_drive_folder_url && (
+                        <p className="text-gray-500 text-sm text-center py-4">No data sources connected.</p>
+                    )}
+                    
                 </div>
             </div>
 
@@ -413,10 +481,10 @@ const FileManager: React.FC<FileManagerProps> = ({
                             <p className="font-semibold text-gray-400">Status</p>
                             <p className={`font-semibold capitalize ${statusIndicatorClasses(viewingFile.status)}`}>{viewingFile.status}</p>
                         </div>
-                        {viewingFile.statusMessage && (
+                        {viewingFile.status_message && (
                              <div>
                                 <p className="font-semibold text-gray-400">Details</p>
-                                <p className="text-gray-300 bg-gray-900/50 p-2 rounded-md whitespace-pre-wrap">{viewingFile.statusMessage}</p>
+                                <p className="text-gray-300 bg-gray-900/50 p-2 rounded-md whitespace-pre-wrap">{viewingFile.status_message}</p>
                             </div>
                         )}
                     </div>

@@ -1,18 +1,24 @@
-// A single place for all our data structures
+// A single place for all our data structures, aligned with the Supabase schema.
 
-/** Represents a file synced from a data source, as seen by the UI. */
+/** Represents a file synced from a data source, as stored in the database. */
 export interface SyncedFile {
-  id: string;
+  id: string; // uuid
+  client_id: string;
+  source_item_id: string;
   name: string;
   status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
-  statusMessage?: string;
+  status_message?: string;
   type: 'pdf' | 'sheet' | 'image' | 'record';
   source: 'GOOGLE_DRIVE' | 'AIRTABLE';
+  summary?: string;
+  last_synced_at?: string; // ISO 8601 timestamp
+  created_at: string;
+  updated_at: string;
 }
 
-/** Represents a full file/record object used by services, including its content. */
+/** Represents a full file/record object used by services during processing. */
 export interface FileObject {
-    id: string;
+    id: string; // source_item_id
     name: string;
     type: 'pdf' | 'sheet' | 'image' | 'record';
     mimeType: string;
@@ -24,41 +30,39 @@ export interface FileObject {
 }
 
 export interface Tag {
-  id:string;
+  id: string; // uuid
+  client_id: string;
   name: string;
+  created_at: string;
 }
 
 export interface Client {
-  id: string;
+  id: string; // uuid
   name: string;
-  apiKey: string;
-  syncedFiles: SyncedFile[];
+  api_key: string;
+  sync_interval: number | 'MANUAL';
+  google_drive_folder_url: string | null;
+  airtable_api_key: string | null;
+  airtable_base_id: string | null;
+  airtable_table_id: string | null;
+  airtable_access_token: string | null;
+  airtable_refresh_token: string | null;
+  airtable_token_expires_at: string | null; // ISO 8601 timestamp
+  created_at: string;
+  updated_at: string;
+  // These are relational fields, hydrated by the application
+  synced_files: SyncedFile[];
   tags: Tag[];
-  syncInterval: number | 'MANUAL'; // in milliseconds, or 'MANUAL' for on-demand
-  
-  // Google Drive Data Source
-  googleDriveFolderUrl: string | null;
-
-  // Airtable Data Source - supports two methods
-  // 1. Personal Access Token (PAT)
-  airtableApiKey: string | null;
-  airtableBaseId: string | null;
-  airtableTableId: string | null;
-
-  // 2. OAuth 2.0
-  airtableAccessToken: string | null;
-  airtableRefreshToken: string | null;
-  airtableTokenExpiresAt: number | null; // Store as timestamp (Date.now() + expiresIn * 1000)
 }
 
 export interface SystemSettings {
-  fileSearchServiceApiKey: string;
-  googleApiKey: string;
-  googleClientId: string;
-  googleClientSecret: string;
-  isGoogleDriveConnected: boolean;
-  
-  // Airtable OAuth App Credentials
-  airtableClientId: string;
-  isAirtableConnected: boolean; // True if OAuth app creds are saved
+  id: number;
+  file_search_service_api_key: string;
+  google_api_key: string | null;
+  google_client_id: string | null;
+  is_google_drive_connected: boolean;
+  airtable_client_id: string | null;
+  is_airtable_connected: boolean;
+  created_at: string;
+  updated_at: string;
 }

@@ -14,7 +14,7 @@ const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
   initialSettings,
   onSave,
 }) => {
-  const [clientId, setClientId] = useState(initialSettings.airtableClientId);
+  const [clientId, setClientId] = useState(initialSettings.airtable_client_id || '');
   const [isSaving, setIsSaving] = useState(false);
   const [copiedUri, setCopiedUri] = useState(false);
 

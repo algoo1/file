@@ -14,7 +14,7 @@ const ApiDetails: React.FC<ApiDetailsProps> = ({ client }) => {
   
   // Example shows both a text query and an optional image payload
   const curlCommand = `curl "${endpoint}" \\
-  -H "x-api-key: ${client.apiKey}" \\
+  -H "x-api-key: ${client.api_key}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "Your question here",
@@ -46,10 +46,10 @@ const ApiDetails: React.FC<ApiDetailsProps> = ({ client }) => {
             <input 
               type="text" 
               readOnly 
-              value={client.apiKey} 
+              value={client.api_key} 
               className="flex-grow bg-gray-700 text-white font-mono text-sm rounded-md px-3 py-2 border border-gray-600 select-all"
             />
-            <button onClick={() => copyToClipboard(client.apiKey, 'key')} className="bg-gray-600 hover:bg-gray-500 text-white font-bold p-2 rounded-md transition-colors">
+            <button onClick={() => copyToClipboard(client.api_key, 'key')} className="bg-gray-600 hover:bg-gray-500 text-white font-bold p-2 rounded-md transition-colors">
               <ClipboardIcon className={`w-5 h-5 ${copiedKey ? 'text-green-400' : ''}`} />
             </button>
           </div>
