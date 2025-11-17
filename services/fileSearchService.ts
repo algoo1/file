@@ -81,26 +81,40 @@ export const fileSearchService = {
             return "There is no data indexed for this client. Please check the Google Drive sync.";
         }
 
-        // This part still uses Gemini, but it simulates the backend of the File Search service doing it.
         // The context is built from the *indexed* summaries.
         const context = clientIndex.files.map(f => `File: ${f.name}\n${f.summary}`).join('\n\n---\n\n');
         
-        // Re-using the geminiService function here simulates the backend logic
-        const prompt = `You are a search API. Answer the user's query based ONLY on the provided indexed information. If the answer is not in the information, say "I cannot find an answer in the provided documents."
+        // Safeguard: Truncate context to avoid exceeding model token limits.
+        const MAX_CONTEXT_LENGTH = 800000;
+        let truncatedContext = context;
+        if (truncatedContext.length > MAX_CONTEXT_LENGTH) {
+            console.warn(`Context length is very large (${truncatedContext.length} chars). Truncating to ${MAX_CONTEXT_LENGTH} chars.`);
+            truncatedContext = truncatedContext.substring(0, MAX_CONTEXT_LENGTH);
+        }
+        
+        const prompt = `You are an intelligent search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context from indexed files.
 
-        Indexed Information:
-        ---
-        ${context}
-        ---
+- Analyze the user's query to understand their intent.
+- Scrutinize the provided "Indexed Information" to find the most relevant passages.
+- Synthesize an answer directly from the information found.
+- If the information is not available in the context, you MUST respond with: "I could not find an answer to your question in the available documents."
+- Do not use any external knowledge.
 
-        User Query: "${query}"
-        `;
+Indexed Information:
+---
+${truncatedContext}
+---
+
+User Query: "${query}"
+
+Answer:
+`;
         
         // Dynamically import the library only when it's needed to avoid startup crashes.
         const { GoogleGenAI } = await import("@google/genai");
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro',
+            model: 'gemini-2.5-flash', // Standardize on flash model for consistency and robustness
             contents: prompt,
         });
         return response.text;

@@ -87,18 +87,4 @@ export const apiService = {
     return { status: 'changed', client: updatedClient };
   },
 
-  query: async (clientApiKey: string, query: string): Promise<string> => {
-      const clients = await databaseService.getClients();
-      const settings = await databaseService.getSettings();
-      
-      const client = clients.find(c => c.apiKey === clientApiKey);
-      if (!client) {
-          return "Error: Invalid Client API Key provided.";
-      }
-       if (!settings.fileSearchServiceApiKey) {
-          return "Error: File Search Service is not configured by the administrator.";
-       }
-
-      return await fileSearchService.query(client, query, settings.fileSearchServiceApiKey);
-  }
 };

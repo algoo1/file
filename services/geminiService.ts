@@ -1,4 +1,6 @@
 
+import { GoogleGenAI } from "@google/genai";
+
 /**
  * Summarizes the content of a document to make it searchable.
  * @param content The text content of the file.
@@ -10,12 +12,21 @@ export async function summarizeContent(content: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   try {
-    const prompt = `Summarize the following document content to create a searchable index. Focus on key entities, topics, main points, and any structured data present. The summary should be concise yet comprehensive.
+    const prompt = `Analyze the following document content and generate a structured summary for a search index. Your goal is to extract key information that a user might search for.
+
+    Follow these instructions:
+    1.  **Main Topic:** Briefly state the main purpose or topic of the document.
+    2.  **Key Entities:** List important names, places, organizations, products, or technical terms.
+    3.  **Core Concepts:** Summarize the main ideas, arguments, or processes described.
+    4.  **Actionable Information:** Extract any specific instructions, contact details (emails, phone numbers), dates, or important numbers.
+
+    Present the output clearly.
 
     Document Content:
     ---
-    ${content}
+    ${content.substring(0, 500000)}
     ---
+    Structured Summary:
     `;
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Client, SystemSettings } from './types.ts';
 import { apiService } from './services/apiService.ts';
+import { fileSearchService } from './services/fileSearchService.ts';
 import ClientManager from './components/ClientManager.tsx';
 import FileManager from './components/FileManager.tsx';
 import SearchInterface from './components/SearchInterface.tsx';
@@ -140,9 +141,16 @@ const App: React.FC = () => {
   }, [selectedClient, settings?.isGoogleDriveConnected]);
 
   const handleSearch = useCallback(async (query: string) => {
-    if (!selectedClient) return "No client selected.";
-    return await apiService.query(selectedClient.apiKey, query);
-  }, [selectedClient]);
+    if (!selectedClient) {
+        return "No client selected.";
+    }
+    if (!settings?.fileSearchServiceApiKey) {
+        return "Error: File Search Service API Key is not configured in Settings.";
+    }
+    // Directly call the file search service for the admin UI test search.
+    // This makes the dependency on the settings clear and avoids the public API simulation.
+    return await fileSearchService.query(selectedClient, query, settings.fileSearchServiceApiKey);
+  }, [selectedClient, settings]);
 
   if (isLoading) {
     return (
@@ -155,7 +163,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
+    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col">
       <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
             <DriveIcon className="w-8 h-8 text-blue-400" />
@@ -163,7 +171,7 @@ const App: React.FC = () => {
         </div>
       </header>
       
-      <main className="flex flex-col md:flex-row gap-6 p-4 md:p-6">
+      <main className="flex flex-col md:flex-row gap-6 p-4 md:p-6 flex-grow">
         <aside className="w-full md:w-1/3 lg:w-1/4 flex flex-col gap-6">
           <Settings 
             settings={settings}
@@ -204,6 +212,11 @@ const App: React.FC = () => {
             )}
         </section>
       </main>
+
+      <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
+        <p>v1.0.1</p>
+      </footer>
+
       {isAuthModalOpen && settings && (
         <GoogleAuthModal 
             onClose={() => setIsAuthModalOpen(false)}
