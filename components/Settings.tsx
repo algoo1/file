@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
+import { CheckIcon } from './icons/CheckIcon.tsx';
 import { SystemSettings } from '../types.ts';
 
 interface SettingsProps {
@@ -36,6 +37,8 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const hasUnsavedChanges = localApiKey !== (settings?.fileSearchServiceApiKey || '');
+
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg">
       <h2 className="text-lg font-semibold mb-3 text-white flex items-center gap-2">
@@ -44,8 +47,14 @@ const Settings: React.FC<SettingsProps> = ({
       </h2>
       <div className="space-y-4">
         <div>
-          <label htmlFor="apiKey" className="block text-sm font-medium text-gray-400 mb-1">
-            File Search Service API Key
+          <label htmlFor="apiKey" className="block text-sm font-medium text-gray-400 mb-1 flex items-center justify-between">
+            <span>File Search Service API Key</span>
+            {settings?.fileSearchServiceApiKey && !hasUnsavedChanges && (
+                <span className="text-green-400 flex items-center gap-1 text-xs" title="API Key is saved">
+                    <CheckIcon className="w-4 h-4" />
+                    Saved
+                </span>
+            )}
           </label>
           <div className="flex gap-2">
             <input
@@ -58,13 +67,13 @@ const Settings: React.FC<SettingsProps> = ({
             />
             <button
               onClick={handleSave}
-              disabled={isSaving}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm disabled:bg-gray-500"
+              disabled={isSaving || !localApiKey.trim() || !hasUnsavedChanges}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm disabled:bg-gray-600 disabled:cursor-not-allowed"
             >
               {isSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
-          {saveSuccess && <p className="text-xs text-green-400 mt-1">Saved!</p>}
+          {saveSuccess && <p className="text-xs text-green-400 mt-1">API Key saved successfully!</p>}
         </div>
 
         <div className="border-t border-gray-700 pt-4">
@@ -73,7 +82,7 @@ const Settings: React.FC<SettingsProps> = ({
                 onClick={onOpenAuthModal}
                 className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
                     settings?.isGoogleDriveConnected 
-                    ? 'bg-green-600/80 text-white cursor-default' 
+                    ? 'bg-green-600/80 text-white' 
                     : 'bg-gray-700 hover:bg-gray-600 text-white'
                 }`}
             >

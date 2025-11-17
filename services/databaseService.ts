@@ -50,7 +50,7 @@ export const databaseService = {
             syncedFiles: [],
             tags: [],
         };
-        clients.push(newClient);
+        clients = [...clients, newClient];
         return { ...newClient };
     },
     updateClient: async (id: string, updates: Partial<Omit<Client, 'id'>>): Promise<Client> => {
