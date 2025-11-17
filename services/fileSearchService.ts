@@ -10,7 +10,7 @@ export const fileSearchService = {
    * @param apiKey The API key to validate.
    */
   validateApiKey: async (apiKey: string): Promise<boolean> => {
-    console.log(`Validating File Search API Key: ${apiKey}`);
+    console.log(`Validating File Search API Key: ${apiKey ? 'present' : 'missing'}`);
     await new Promise(resolve => setTimeout(resolve, 500));
     // Simple validation for mock: key must not be empty
     const isValid = !!apiKey.trim();
@@ -42,12 +42,11 @@ export const fileSearchService = {
     // Process and summarize each file before "uploading"
     const processedFiles: FileObject[] = await Promise.all(filesFromDrive.map(async (driveFile) => {
         try {
-            const summary = await summarizeContent(driveFile.content);
-            // FIX: Changed status from 'indexed' to 'COMPLETED' to match the FileObject type definition.
+            // CRITICAL FIX: Pass the API key to the summarization service.
+            const summary = await summarizeContent(driveFile.content, fileSearchApiKey);
             return { ...driveFile, summary, status: 'COMPLETED' };
         } catch (e) {
             console.error(`Failed to summarize ${driveFile.name}`, e);
-            // FIX: Changed status from 'error' to 'FAILED' to match the FileObject type definition.
             return { ...driveFile, summary: '', status: 'FAILED' };
         }
     }));
@@ -112,7 +111,8 @@ Answer:
         
         // Dynamically import the library only when it's needed to avoid startup crashes.
         const { GoogleGenAI } = await import("@google/genai");
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        // CRITICAL FIX: Use the fileSearchApiKey provided by the user from settings.
+        const ai = new GoogleGenAI({ apiKey: fileSearchApiKey });
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash', // Standardize on flash model for consistency and robustness
             contents: prompt,
@@ -121,7 +121,7 @@ Answer:
     } catch (error) {
         console.error("Error during query:", error);
         if (error instanceof Error && error.message.includes("API key")) {
-            return "Error: The Gemini API key is not configured correctly on the server.";
+            return "Error: The provided File Search Service API Key is invalid or missing permissions for the Gemini API.";
         }
         return "An unexpected error occurred while querying the data.";
     }

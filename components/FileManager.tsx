@@ -81,7 +81,7 @@ const FileManager: React.FC<FileManagerProps> = ({
                     className="flex-grow bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
                 />
                 <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-md transition-colors text-sm">
-                    Link
+                    Save
                 </button>
             </form>
              
@@ -118,7 +118,8 @@ const FileManager: React.FC<FileManagerProps> = ({
             </div>
 
             <div className="border-t border-gray-700 pt-4 mt-4">
-                 <h3 className="text-md font-semibold text-gray-300 mb-3">Tags</h3>
+                 <h3 className="text-md font-semibold text-gray-300 mb-2">Tags</h3>
+                 <p className="text-xs text-gray-500 mb-3">Use tags to categorize and organize your clients' data sources.</p>
                  <div className="flex flex-wrap gap-2 mb-3">
                     {client.tags.map(tag => (
                         <TagPill key={tag.id} tag={tag} onRemove={() => onRemoveTag(client.id, tag.id)} />
