@@ -85,7 +85,14 @@ export const apiService = {
 
     if (isAirtableConfigured) {
         const airtableRecordsMeta = await airtableService.getRecords(client, settings.airtable_client_id);
-        allSourceFilesMeta.push(...airtableRecordsMeta.map(r => ({ id: r.id, name: r.name, type: 'record' as const, source: 'AIRTABLE' as const, mimeType: 'application/json' })));
+        allSourceFilesMeta.push(...airtableRecordsMeta.map(r => ({ 
+            id: r.id, 
+            name: r.name, 
+            type: 'record' as const, 
+            source: 'AIRTABLE' as const, 
+            mimeType: 'application/json',
+            source_modified_at: r.createdTime
+        })));
     }
     
     // 2. Prepare initial UI state and clear the old search index

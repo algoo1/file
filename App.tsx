@@ -274,10 +274,14 @@ const App: React.FC = () => {
     setClients(prev => prev.map(c => c.id === clientId ? { ...c, tags: c.tags.filter(t => t.id !== tagId) } : c));
   }, []);
 
-  const handleSearch = useCallback(async (query: string, image?: { data: string; mimeType: string }) => {
+  const handleSearch = useCallback(async (
+    query: string, 
+    source: 'ALL' | 'GOOGLE_DRIVE' | 'AIRTABLE',
+    image?: { data: string; mimeType: string }
+  ) => {
     if (!selectedClient) return "No client selected.";
     if (!settings?.file_search_service_api_key) return "Error: File Search Service API Key is not configured in Settings.";
-    return await fileSearchService.query(selectedClient, query, settings.file_search_service_api_key, image);
+    return await fileSearchService.query(selectedClient, query, settings.file_search_service_api_key, source, image);
   }, [selectedClient, settings]);
 
   if (isLoading) {

@@ -14,7 +14,7 @@ const getClientIndex = (clientId: string) => {
     if (!clientSearchIndexes[clientId]) {
         clientSearchIndexes[clientId] = new MiniSearch({
             fields: ['name', 'summary'], // fields to index for full-text search
-            storeFields: ['name', 'summary'], // fields to return with search results
+            storeFields: ['name', 'summary', 'source'], // fields to return with search results
             searchOptions: {
                 prefix: true, // support "prefix search" (e.g., "star" matches "starry")
                 fuzzy: 0.2,   // allow for some typos
@@ -29,7 +29,7 @@ const getClientIndex = (clientId: string) => {
  * @param clientId The ID of the client.
  * @param file The file object containing the data to index.
  */
-const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 'name' | 'summary'>) => {
+const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 'name' | 'summary' | 'source'>) => {
     const index = getClientIndex(clientId);
     // Use a Map-like interface for documents, with `id` being the unique identifier.
     if (index.has(file.id)) {
@@ -37,7 +37,7 @@ const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 
     } else {
         index.add(file);
     }
-    console.log(`Indexed file "${file.name}" for client ${clientId}. Index now contains ${index.documentCount} documents.`);
+    console.log(`Indexed file "${file.name}" from ${file.source} for client ${clientId}. Index now contains ${index.documentCount} documents.`);
 };
 
 export const fileSearchService = {
@@ -105,6 +105,7 @@ export const fileSearchService = {
     client: Client,
     query: string,
     fileSearchApiKey: string,
+    source: 'ALL' | 'GOOGLE_DRIVE' | 'AIRTABLE',
     image?: { data: string; mimeType: string }
   ): Promise<string> => {
     try {
@@ -114,35 +115,37 @@ export const fileSearchService = {
         
         const localIndex = getClientIndex(client.id);
         if (localIndex.documentCount === 0) {
-            return "There is no data indexed for this client. Please check the Google Drive sync.";
+            return "There is no data indexed for this client. Please sync a data source first.";
         }
 
         // STEP 1: Fast local search to pre-filter relevant documents.
-        // If there's an image, we can't pre-filter effectively, so we take a few recent files.
-        // If there's text, we do a full-text search.
-        let relevantFiles;
+        let searchResults;
         if (query.trim()) {
-            const searchResults = localIndex.search(query, {
+            searchResults = localIndex.search(query, {
                 fields: ['name', 'summary'],
                 combineWith: 'AND',
             });
-            // Take the top 5 most relevant results from the local search.
-            relevantFiles = searchResults.slice(0, 5); 
         } else {
-            // If it's an image-only query, we can't do a text search.
-            // A simple strategy is to take the most recently added documents. This could be improved.
+            // If it's an image-only query, we take all documents for context.
             // FIX: MiniSearch does not have a public API to get all documents.
-            // Accessing the internal `_documents` map is a workaround to retrieve
-            // all stored items for context in an image-only search.
-            relevantFiles = Array.from((localIndex as any)._documents.values()).slice(-3);
+            // Accessing the internal `_documents` map is a workaround.
+            searchResults = Array.from((localIndex as any)._documents.values());
         }
         
+        // Filter by the selected data source.
+        const filteredBySource = source === 'ALL' 
+            ? searchResults 
+            : searchResults.filter(r => r.source === source);
+
+        // Take the top 5 most relevant results from the filtered list.
+        const relevantFiles = filteredBySource.slice(0, 5);
+        
         if (relevantFiles.length === 0) {
-             return "I could not find any relevant documents for your query.";
+             return `I could not find any relevant documents for your query in the selected source (${source.replace('_', ' ')}).`;
         }
 
         const context = relevantFiles
-            .map(f => `File: ${f.name}\n${f.summary}`)
+            .map(f => `Source: ${f.source}\nFile: ${f.name}\n${f.summary}`)
             .join('\n\n---\n\n');
         
         // STEP 2: Call the AI with a much smaller, more relevant context.

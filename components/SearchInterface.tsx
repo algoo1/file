@@ -1,13 +1,15 @@
-
-
 import React, { useState, useCallback, useRef } from 'react';
 import { Client } from '../types.ts';
 import { SearchIcon } from './icons/SearchIcon.tsx';
 import { ImageIcon } from './icons/ImageIcon.tsx';
+import { DriveIcon } from './icons/DriveIcon.tsx';
+import { AirtableIcon } from './icons/AirtableIcon.tsx';
+
+type SearchSource = 'ALL' | 'GOOGLE_DRIVE' | 'AIRTABLE';
 
 interface SearchInterfaceProps {
   client: Client;
-  onSearch: (query: string, image?: { data: string; mimeType: string }) => Promise<string>;
+  onSearch: (query: string, source: SearchSource, image?: { data: string; mimeType: string }) => Promise<string>;
 }
 
 const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) => {
@@ -15,6 +17,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
   const [result, setResult] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<{ data: string; mimeType: string } | null>(null);
+  const [searchSource, setSearchSource] = useState<SearchSource>('ALL');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -36,7 +39,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
     setIsLoading(true);
     setResult('');
     try {
-      const response = await onSearch(query, selectedImage);
+      const response = await onSearch(query, searchSource, selectedImage);
       setResult(response);
     } catch (error) {
       setResult(error instanceof Error ? error.message : "An error occurred while searching. Please try again.");
@@ -44,13 +47,28 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
     } finally {
       setIsLoading(false);
     }
-  }, [onSearch, query, selectedImage]);
+  }, [onSearch, query, selectedImage, searchSource]);
   
+  const hasGoogleDrive = !!client.google_drive_folder_url;
+  const hasAirtable = (!!client.airtable_api_key || !!client.airtable_access_token) && !!client.airtable_base_id && !!client.airtable_table_id;
+  const hasDataSource = hasGoogleDrive || hasAirtable;
   const hasContentToSearch = query.trim() || selectedImage;
-  const hasDataSource = client.google_drive_folder_url || 
-                        (client.airtable_api_key && client.airtable_base_id && client.airtable_table_id) ||
-                        (client.airtable_access_token && client.airtable_base_id && client.airtable_table_id);
   const canSearch = !isLoading && hasContentToSearch && hasDataSource;
+
+  const SourceButton: React.FC<{source: SearchSource, label: string, icon: React.ReactNode, enabled: boolean}> = ({ source, label, icon, enabled }) => (
+    <button
+        type="button"
+        onClick={() => enabled && setSearchSource(source)}
+        disabled={!enabled}
+        className={`flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-full transition-colors
+            ${searchSource === source ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}
+            ${!enabled ? 'opacity-50 cursor-not-allowed' : ''}
+        `}
+    >
+        {icon}
+        {label}
+    </button>
+  );
 
   return (
     <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
@@ -63,6 +81,13 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
       </p>
 
       <form onSubmit={handleSearch}>
+        <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-medium text-gray-400">Search in:</span>
+            <SourceButton source="ALL" label="All Sources" icon={<>🗂️</>} enabled={hasDataSource} />
+            <SourceButton source="GOOGLE_DRIVE" label="Google Drive" icon={<DriveIcon className="w-4 h-4" />} enabled={hasGoogleDrive} />
+            <SourceButton source="AIRTABLE" label="Airtable" icon={<AirtableIcon className="w-4 h-4" />} enabled={hasAirtable} />
+        </div>
+
         {selectedImage && (
             <div className="mb-4 relative w-48 h-48 border-2 border-dashed border-gray-600 rounded-lg p-2">
                 <img src={`data:${selectedImage.mimeType};base64,${selectedImage.data}`} alt="Search preview" className="w-full h-full object-contain rounded-md" />
@@ -102,7 +127,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
              <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed min-w-[120px]" disabled={!canSearch}>
                 {isLoading ? (
                     <>
-                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>

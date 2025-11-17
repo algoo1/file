@@ -300,18 +300,18 @@ const FileManager: React.FC<FileManagerProps> = ({
             return { status: 'FAILED', text: 'Sync failed', icon: <XCircleIcon className="w-5 h-5 text-red-500" /> };
       }
 
+      // If all Airtable records we know about are completed, the sync was successful.
       if (totalAirtableRecords > 0 && airtableRecords.every(r => r.status === 'COMPLETED')) {
           const recordText = totalAirtableRecords === 1 ? 'record' : 'records';
           return { status: 'COMPLETED', text: `Synced (${totalAirtableRecords} ${recordText})`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
       }
       
-      // This state occurs if a sync ran but found 0 records
-      const wasSyncAttempted = client.synced_files.length > 0 && client.synced_files.every(f => f.status === 'COMPLETED' || f.status === 'FAILED');
-      if (wasSyncAttempted && totalAirtableRecords === 0) {
+      // Fix for "0 records" bug: Only show "Synced (0 records)" if the *entire* sync is complete and no Airtable records were found.
+      const isSyncFinished = !isSyncing && client.synced_files.length > 0 && client.synced_files.every(f => f.status === 'COMPLETED' || f.status === 'FAILED');
+      if (isSyncFinished && totalAirtableRecords === 0) {
           return { status: 'COMPLETED', text: `Synced (0 records)`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
       }
 
-      // "Ready to Sync" is a clearer initial state than "Pending".
       return { status: 'IDLE', text: 'Ready to Sync', icon: <ClockIcon className="w-5 h-5 text-gray-400" /> };
   }
 
@@ -509,9 +509,9 @@ const FileManager: React.FC<FileManagerProps> = ({
                             <p className="font-semibold text-gray-400">Status</p>
                             <p className={`font-semibold capitalize ${statusIndicatorClasses(viewingFile.status)}`}>{viewingFile.status}</p>
                         </div>
-                        {viewingFile.source === 'GOOGLE_DRIVE' && viewingFile.source_modified_at && (
+                        {viewingFile.source_modified_at && (
                              <div>
-                                <p className="font-semibold text-gray-400">Source Modified</p>
+                                <p className="font-semibold text-gray-400">{viewingFile.source === 'GOOGLE_DRIVE' ? 'Last Modified (in Drive)' : 'Record Created (in Airtable)'}</p>
                                 <p className="text-gray-200">{formatDate(viewingFile.source_modified_at)}</p>
                             </div>
                         )}

@@ -153,7 +153,7 @@ export const airtableService = {
       throw new Error("No Airtable authentication method configured for this client.");
   },
 
-  getRecords: async (client: Client, airtableClientId: string | null): Promise<{ id: string, name: string }[]> => {
+  getRecords: async (client: Client, airtableClientId: string | null): Promise<{ id: string, name: string, createdTime: string }[]> => {
     const authToken = await airtableService.getAuthToken(client, airtableClientId);
     const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}`;
     try {
@@ -163,7 +163,11 @@ export const airtableService = {
         throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch records'} (Code: ${response.status})`);
       }
       const data = await response.json();
-      return data.records.map((record: any) => ({ id: record.id, name: findPrimaryFieldName(record) }));
+      return data.records.map((record: any) => ({ 
+          id: record.id, 
+          name: findPrimaryFieldName(record),
+          createdTime: record.createdTime 
+      }));
     } catch (error) {
         console.error("Failed to fetch records from Airtable:", error);
         throw error;
