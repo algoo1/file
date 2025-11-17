@@ -1,4 +1,5 @@
 
+
 import { FileObject, Client } from '../types.ts';
 import { summarizeSingleContent } from './geminiService.ts';
 
@@ -71,18 +72,24 @@ export const fileSearchService = {
 
 
   /**
-   * Queries the indexed data for a specific client.
+   * Queries the indexed data for a specific client, with optional image input.
    * @param client The client object.
-   * @param query The user's search query.
+   * @param query The user's text search query.
    * @param fileSearchApiKey The user's API key for this service.
+   * @param image Optional image data for multimodal search.
    */
-  query: async (client: Client, query: string, fileSearchApiKey: string): Promise<string> => {
+  query: async (
+    client: Client,
+    query: string,
+    fileSearchApiKey: string,
+    image?: { data: string; mimeType: string }
+  ): Promise<string> => {
     try {
         if (!(await fileSearchService.validateApiKey(fileSearchApiKey))) {
             return "Error: Invalid File Search API Key.";
         }
 
-        console.log(`Querying data for client ${client.name} with query: "${query}"`);
+        console.log(`Querying data for client ${client.name} with query: "${query}" and image: ${image ? 'present' : 'absent'}`);
         await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
 
         const clientIndex = fileSearchIndex[client.id];
@@ -90,7 +97,6 @@ export const fileSearchService = {
             return "There is no data indexed for this client. Please check the Google Drive sync.";
         }
         
-        // Build context from the indexed summaries stored in the Map.
         const context = Array.from(clientIndex.files.values())
             .map(f => `File: ${f.name}\n${f.summary}`)
             .join('\n\n---\n\n');
@@ -102,10 +108,11 @@ export const fileSearchService = {
             truncatedContext = truncatedContext.substring(0, MAX_CONTEXT_LENGTH);
         }
         
-        const prompt = `You are an intelligent search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context from indexed files.
+        const promptText = `You are an intelligent search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context from indexed files and the user-provided image if available.
 
-- Analyze the user's query to understand their intent.
-- Scrutinize the provided "Indexed Information" to find the most relevant passages.
+- Analyze the user's query and image (if provided) to understand their intent.
+- Scrutinize the provided "Indexed Information" to find the most relevant passages or file descriptions.
+- If an image is provided, use it as the primary subject of the query. Find information about what is depicted in the image from the indexed text.
 - Synthesize an answer directly from the information found.
 - If the information is not available in the context, you MUST respond with: "I could not find an answer to your question in the available documents."
 - Do not use any external knowledge.
@@ -119,13 +126,25 @@ User Query: "${query}"
 
 Answer:
 `;
-        
+
         const { GoogleGenAI } = await import("@google/genai");
         const ai = new GoogleGenAI({ apiKey: fileSearchApiKey });
+        
+        const parts: any[] = [{ text: promptText }];
+        if (image) {
+            parts.push({
+                inlineData: {
+                    mimeType: image.mimeType,
+                    data: image.data,
+                },
+            });
+        }
+        
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: prompt,
+            contents: { parts: parts },
         });
+
         return response.text;
     } catch (error) {
         console.error("Error during query:", error);

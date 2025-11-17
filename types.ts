@@ -6,13 +6,15 @@ export interface SyncedFile {
   name: string;
   status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
   statusMessage?: string;
+  type: 'pdf' | 'sheet' | 'image';
 }
 
 /** Represents a full file object used by services, including its content. */
 export interface FileObject {
     id: string;
     name: string;
-    type: 'pdf' | 'sheet';
+    type: 'pdf' | 'sheet' | 'image';
+    mimeType: string;
     content: string;
     summary: string;
     status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';

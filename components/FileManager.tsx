@@ -4,6 +4,10 @@ import { PlusIcon } from './icons/PlusIcon.tsx';
 import { CheckIcon } from './icons/CheckIcon.tsx';
 import { RefreshIcon } from './icons/RefreshIcon.tsx';
 import { EyeIcon } from './icons/EyeIcon.tsx';
+import { ImageIcon } from './icons/ImageIcon.tsx';
+import { SheetIcon } from './icons/SheetIcon.tsx';
+import { DocumentIcon } from './icons/DocumentIcon.tsx';
+
 
 interface FileManagerProps {
   client: Client;
@@ -39,6 +43,16 @@ const TagPill: React.FC<{tag: Tag; onRemove: (tagId: string) => void}> = ({ tag,
         </button>
     </div>
 );
+
+const FileTypeIcon: React.FC<{type: SyncedFile['type']}> = ({ type }) => {
+    const className = "w-5 h-5 text-gray-400 mr-2 flex-shrink-0";
+    switch (type) {
+        case 'image': return <ImageIcon className={className} />;
+        case 'sheet': return <SheetIcon className={className} />;
+        case 'pdf': return <DocumentIcon className={className} />;
+        default: return null;
+    }
+};
 
 const FileManager: React.FC<FileManagerProps> = ({ 
     client, 
@@ -198,15 +212,18 @@ const FileManager: React.FC<FileManagerProps> = ({
                         <ul className="space-y-2">
                         {client.syncedFiles.map(file => (
                             <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
-                                <a
-                                  href={`https://drive.google.com/file/d/${file.id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="truncate text-gray-300 hover:text-blue-400 hover:underline flex-grow"
-                                  title={file.name}
-                                >
-                                  {file.name}
-                                </a>
+                                <div className="flex items-center min-w-0">
+                                    <FileTypeIcon type={file.type} />
+                                    <a
+                                    href={`https://drive.google.com/file/d/${file.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="truncate text-gray-300 hover:text-blue-400 hover:underline"
+                                    title={file.name}
+                                    >
+                                    {file.name}
+                                    </a>
+                                </div>
                                 <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
                                     <EyeIcon className="w-5 h-5" />
                                 </button>

@@ -1,4 +1,5 @@
 
+
 import { databaseService } from './databaseService.ts';
 import { googleDriveService } from './googleDriveService.ts';
 import { fileSearchService } from './fileSearchService.ts';
@@ -78,36 +79,43 @@ export const apiService = {
         return { status: 'unchanged', client };
     }
     
+    const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
+      if (mimeType.includes('spreadsheet')) return 'sheet';
+      if (mimeType.startsWith('image/')) return 'image';
+      return 'pdf'; // Default for PDF, GDoc, text
+    };
+
     // 2. Prepare initial UI state and clear the old search index
     const initialSyncedFiles: SyncedFile[] = filesMetaFromDrive.map(f => ({
         id: f.id,
         name: f.name,
         status: 'IDLE',
-        statusMessage: 'In queue...'
+        statusMessage: 'In queue...',
+        type: getFileType(f.mimeType),
     }));
 
     onProgress({ type: 'INITIAL_LIST', files: initialSyncedFiles });
     await fileSearchService.clearIndexForClient(clientId);
 
-    // FIX: Define getFileType with an explicit return type and move it outside the loop.
-    const getFileType = (mimeType: string): 'pdf' | 'sheet' => mimeType.includes('spreadsheet') ? 'sheet' : 'pdf';
 
     // 3. Process each file sequentially
     const allProcessedFiles: FileObject[] = [];
     for (const fileMeta of filesMetaFromDrive) {
         let finalFileObject: FileObject;
+        const fileType = getFileType(fileMeta.mimeType);
         
         try {
             onProgress({ type: 'FILE_UPDATE', update: { id: fileMeta.id, status: 'SYNCING', statusMessage: 'Fetching content...' }});
             const content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
 
-            onProgress({ type: 'FILE_UPDATE', update: { id: fileMeta.id, status: 'INDEXING', statusMessage: 'Summarizing with AI...' }});
+            onProgress({ type: 'FILE_UPDATE', update: { id: fileMeta.id, status: 'INDEXING', statusMessage: 'Processing with AI...' }});
             
             const fileData = {
                 id: fileMeta.id,
                 name: fileMeta.name,
                 content: content,
-                type: getFileType(fileMeta.mimeType),
+                type: fileType,
+                mimeType: fileMeta.mimeType,
             };
             
             finalFileObject = await fileSearchService.indexSingleFile(client, fileData, settings.fileSearchServiceApiKey);
@@ -117,7 +125,8 @@ export const apiService = {
              finalFileObject = {
                  id: fileMeta.id,
                  name: fileMeta.name,
-                 type: getFileType(fileMeta.mimeType),
+                 type: fileType,
+                 mimeType: fileMeta.mimeType,
                  content: '',
                  summary: '',
                  status: 'FAILED',
@@ -125,7 +134,7 @@ export const apiService = {
              };
         }
         
-        onProgress({ type: 'FILE_UPDATE', update: { id: finalFileObject.id, status: finalFileObject.status, statusMessage: finalFileObject.statusMessage }});
+        onProgress({ type: 'FILE_UPDATE', update: { id: finalFileObject.id, status: finalFileObject.status, statusMessage: finalFileObject.statusMessage, type: finalFileObject.type }});
         allProcessedFiles.push(finalFileObject);
     }
 

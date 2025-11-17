@@ -88,6 +88,7 @@ export const databaseService = {
             name: f.name,
             status: f.status,
             statusMessage: f.statusMessage,
+            type: f.type,
         }));
         return await databaseService.updateClient(clientId, { syncedFiles });
     }

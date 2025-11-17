@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings, SyncedFile } from './types.ts';
 import { apiService } from './services/apiService.ts';
@@ -179,28 +180,19 @@ const App: React.FC = () => {
     setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
   }, []);
 
-  const handleSearch = useCallback(async (query: string) => {
+  const handleSearch = useCallback(async (query: string, image?: { data: string; mimeType: string }) => {
     if (!selectedClient) {
         return "No client selected.";
     }
     if (!settings?.fileSearchServiceApiKey) {
         return "Error: File Search Service API Key is not configured in Settings.";
     }
-
-    try {
-        // Sync data source on-demand before every search to ensure data is fresh.
-        // No-op progress handler for background sync.
-        const result = await apiService.syncDataSource(selectedClient.id, () => {});
-         if (result.status === 'changed') {
-            setClients(prev => prev.map(c => c.id === selectedClient.id ? result.client : c));
-        }
-    } catch (error) {
-        console.error("Sync failed during search operation:", error);
-        const errorMessage = error instanceof Error ? error.message : "Failed to sync latest data before searching.";
-        throw new Error(errorMessage);
-    }
     
-    return await fileSearchService.query(selectedClient, query, settings.fileSearchServiceApiKey);
+    // A search does not trigger a full re-sync anymore to avoid high costs.
+    // Manual or scheduled syncs are responsible for keeping data fresh.
+    // We could add a check here for stale data in the future if needed.
+    
+    return await fileSearchService.query(selectedClient, query, settings.fileSearchServiceApiKey, image);
   }, [selectedClient, settings]);
 
   if (isLoading) {
