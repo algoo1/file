@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings, SyncedFile } from './types.ts';
 import { apiService } from './services/apiService.ts';
@@ -11,12 +12,14 @@ import Settings from './components/Settings.tsx';
 import GoogleAuthModal from './components/GoogleAuthModal.tsx';
 import AirtableAuthModal from './components/AirtableAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
+import { XCircleIcon } from './components/icons/XCircleIcon.tsx';
 
 const App: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState(false);
   const [isAirtableAuthModalOpen, setIsAirtableAuthModalOpen] = useState(false);
   const [isSyncingClient, setIsSyncingClient] = useState<string | null>(null);
@@ -65,6 +68,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        setInitError(null);
         const { clients: initialClients, settings: initialSettings } = await apiService.getInitialData();
         setClients(initialClients);
         setSettings(initialSettings);
@@ -73,7 +77,8 @@ const App: React.FC = () => {
         }
       } catch (error) {
         console.error("Failed to initialize app data:", error);
-        alert("Could not connect to the database. Please check your Supabase credentials and network connection.");
+        const errorMessage = `Could not connect to the database. This is likely due to an incomplete database setup or incorrect RLS policies. Please run the complete setup script in your Supabase SQL Editor. Error: ${error instanceof Error ? error.message : 'Unknown'}`;
+        setInitError(errorMessage);
       } finally {
         setIsLoading(false);
       }
@@ -268,6 +273,18 @@ const App: React.FC = () => {
         </div>
     );
   }
+  
+  if (initError) {
+    return (
+        <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-center p-4">
+            <XCircleIcon className="w-16 h-16 text-red-500 mb-4" />
+            <h2 className="text-2xl font-semibold text-white">Application Initialization Failed</h2>
+            <p className="text-gray-400 mt-2 max-w-xl">{initError}</p>
+            <p className="text-gray-500 mt-4 text-xs">Check the browser console for more technical details.</p>
+        </div>
+    );
+  }
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col">
