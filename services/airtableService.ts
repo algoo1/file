@@ -2,6 +2,8 @@
 import { Client, SystemSettings } from '../types.ts';
 
 const AIRTABLE_AUTH_URL = 'https://airtable.com/oauth2/v1/authorize';
+// Use a CORS proxy to bypass browser security restrictions for token exchange.
+const CORS_PROXY_URL = 'https://corsproxy.io/?';
 const AIRTABLE_TOKEN_URL = 'https://airtable.com/oauth2/v1/token';
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 
@@ -109,7 +111,8 @@ export const airtableService = {
           grant_type: 'authorization_code',
       });
       
-      const response = await safeFetch(AIRTABLE_TOKEN_URL, {
+      const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
+      const response = await safeFetch(proxiedTokenUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: params.toString(),
@@ -140,8 +143,9 @@ export const airtableService = {
         refresh_token: client.airtable_refresh_token,
         grant_type: 'refresh_token',
     });
-
-    const response = await safeFetch(AIRTABLE_TOKEN_URL, {
+    
+    const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
+    const response = await safeFetch(proxiedTokenUrl, {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/x-www-form-urlencoded',
