@@ -64,6 +64,7 @@ export interface SystemSettings {
   google_client_id: string | null;
   is_google_drive_connected: boolean;
   airtable_client_id: string | null;
+  airtable_client_secret: string | null;
   is_airtable_connected: boolean;
   created_at: string;
   updated_at: string;

@@ -143,9 +143,12 @@ const App: React.FC = () => {
     }
   }, [handleSaveSettings]);
 
-  const handleSaveAirtableSettings = useCallback(async (clientId: string) => {
+  const handleSaveAirtableSettings = useCallback(async (creds: { clientId: string; clientSecret: string }) => {
     try {
-      await handleSaveSettings({ airtable_client_id: clientId });
+      await handleSaveSettings({ 
+        airtable_client_id: creds.clientId,
+        airtable_client_secret: creds.clientSecret,
+       });
       const finalSettings = await apiService.saveSettings({ is_airtable_connected: true });
       setSettings(finalSettings);
       setIsAirtableAuthModalOpen(false);

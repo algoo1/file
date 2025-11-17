@@ -1,5 +1,5 @@
 // This service handles all interactions with the Airtable API.
-import { Client } from '../types.ts';
+import { Client, SystemSettings } from '../types.ts';
 
 const AIRTABLE_AUTH_URL = 'https://airtable.com/oauth2/v1/authorize';
 const AIRTABLE_TOKEN_URL = 'https://airtable.com/oauth2/v1/token';
@@ -79,7 +79,7 @@ export const airtableService = {
         client_id: clientId,
         redirect_uri: REDIRECT_URI,
         response_type: 'code',
-        scope: 'data.records:read',
+        scope: 'data.records:read schema.bases:read', // Added schema read scope
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
         state: clientState,
@@ -130,34 +130,71 @@ export const airtableService = {
       };
   },
 
+  refreshToken: async (client: Client, settings: SystemSettings): Promise<Partial<Client>> => {
+    if (!client.airtable_refresh_token || !settings.airtable_client_id || !settings.airtable_client_secret) {
+        throw new Error("Missing credentials for token refresh.");
+    }
+    
+    const params = new URLSearchParams({
+        client_id: settings.airtable_client_id,
+        refresh_token: client.airtable_refresh_token,
+        grant_type: 'refresh_token',
+    });
+
+    const authHeader = 'Basic ' + btoa(`${settings.airtable_client_id}:${settings.airtable_client_secret}`);
+
+    const response = await safeFetch(AIRTABLE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': authHeader
+        },
+        body: params.toString(),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Airtable token refresh failed:", errorData);
+        throw new Error(`Airtable token refresh failed: ${errorData.error_description || 'Please re-authenticate.'}`);
+    }
+
+    const tokenData = await response.json();
+    return {
+        airtable_access_token: tokenData.access_token,
+        airtable_refresh_token: tokenData.refresh_token,
+        airtable_token_expires_at: new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString(),
+    };
+  },
+
   /**
    * Gets a valid authentication token, refreshing it if necessary.
-   * @param client The client object.
-   * @param airtableClientId The system-wide Airtable Client ID.
-   * @returns The valid auth token (could be PAT or access token).
+   * @returns An object with the valid access token and any new tokens to save.
    */
-  getAuthToken: async (client: Client, airtableClientId: string | null): Promise<string> => {
+  getAuthToken: async (
+    client: Client, 
+    settings: SystemSettings
+  ): Promise<{ accessToken: string; newTokensToSave?: Partial<Client> }> => {
       // Prioritize OAuth access token
       if (client.airtable_access_token) {
           if (client.airtable_token_expires_at && new Date() >= new Date(client.airtable_token_expires_at)) {
-              // TODO: Implement token refresh logic if needed
-              console.warn("Airtable access token has expired. Re-authentication is required.");
-              throw new Error("Airtable token expired. Please reconnect.");
+              console.log("Airtable access token has expired. Attempting to refresh...");
+              const newTokens = await airtableService.refreshToken(client, settings);
+              return { accessToken: newTokens.airtable_access_token!, newTokensToSave: newTokens };
           }
-          return client.airtable_access_token;
+          return { accessToken: client.airtable_access_token };
       }
       // Fallback to Personal Access Token
       if (client.airtable_api_key) {
-          return client.airtable_api_key;
+          return { accessToken: client.airtable_api_key };
       }
       throw new Error("No Airtable authentication method configured for this client.");
   },
 
-  getRecords: async (client: Client, airtableClientId: string | null): Promise<{ id: string, name: string, createdTime: string }[]> => {
-    const authToken = await airtableService.getAuthToken(client, airtableClientId);
+  getRecords: async (client: Client, settings: SystemSettings): Promise<{ id: string, name: string, createdTime: string }[]> => {
+    const { accessToken } = await airtableService.getAuthToken(client, settings);
     const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}`;
     try {
-      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
+      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch records'} (Code: ${response.status})`);
@@ -174,11 +211,11 @@ export const airtableService = {
     }
   },
 
-  getRecordContent: async (client: Client, airtableClientId: string | null, recordId: string): Promise<string> => {
-    const authToken = await airtableService.getAuthToken(client, airtableClientId);
+  getRecordContent: async (client: Client, settings: SystemSettings, recordId: string): Promise<string> => {
+    const { accessToken } = await airtableService.getAuthToken(client, settings);
     const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}/${recordId}`;
     try {
-      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
+      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch record content'} (Code: ${response.status})`);

@@ -50,14 +50,14 @@ export const apiService = {
     clientId: string, 
     onProgress: (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => void
   ): Promise<{ client: Client }> => {
-    const client = await databaseService.getClientById(clientId);
+    let client = await databaseService.getClientById(clientId);
     const settings = await databaseService.getSettings();
 
     if (!client) throw new Error("Client not found.");
     if (!settings.file_search_service_api_key) throw new Error("File Search Service API Key is not set.");
 
     const isDriveConfigured = !!client.google_drive_folder_url && settings.is_google_drive_connected;
-    const isAirtableConfigured = (!!client.airtable_api_key || !!client.airtable_access_token) && !!client.airtable_base_id && !!client.airtable_table_id;
+    let isAirtableConfigured = (!!client.airtable_api_key || !!client.airtable_access_token) && !!client.airtable_base_id && !!client.airtable_table_id;
 
     if (!isDriveConfigured && !isAirtableConfigured) {
       throw new Error("No data source is configured for this client.");
@@ -84,7 +84,15 @@ export const apiService = {
     }
 
     if (isAirtableConfigured) {
-        const airtableRecordsMeta = await airtableService.getRecords(client, settings.airtable_client_id);
+      try {
+        // This block handles automatic token refresh and saves the new token if one is acquired.
+        const { newTokensToSave } = await airtableService.getAuthToken(client, settings);
+        if (newTokensToSave) {
+          console.log("Airtable token was refreshed. Saving new tokens to database.");
+          client = await databaseService.updateClient(client.id, newTokensToSave);
+        }
+
+        const airtableRecordsMeta = await airtableService.getRecords(client, settings);
         allSourceFilesMeta.push(...airtableRecordsMeta.map(r => ({ 
             id: r.id, 
             name: r.name, 
@@ -93,6 +101,16 @@ export const apiService = {
             mimeType: 'application/json',
             source_modified_at: r.createdTime
         })));
+      } catch (authError) {
+          console.error("Airtable authentication failed and could not be refreshed.", authError);
+          // Clear broken credentials to force a reconnect.
+          await databaseService.updateClient(client.id, {
+              airtable_access_token: null,
+              airtable_refresh_token: null,
+              airtable_token_expires_at: null,
+          });
+          throw new Error("Airtable connection failed. Please reconnect your Airtable account.");
+      }
     }
     
     // 2. Prepare initial UI state and clear the old search index
@@ -126,14 +144,14 @@ export const apiService = {
                 if (fileMeta.source === 'GOOGLE_DRIVE') {
                     content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
                 } else if (fileMeta.source === 'AIRTABLE') {
-                    content = await airtableService.getRecordContent(client, settings.airtable_client_id, fileMeta.id);
+                    content = await airtableService.getRecordContent(client!, settings, fileMeta.id);
                 }
 
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Processing with AI...' }});
                 
                 const fileData = { ...fileMeta, content };
                 
-                finalFileObject = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
+                finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
                 
             } catch (error) {
                  console.error(`Critical error processing item ${fileMeta.name} (${fileMeta.id}):`, error);
