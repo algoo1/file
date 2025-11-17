@@ -1,5 +1,5 @@
 import { FileObject, Client } from '../types.ts';
-import { summarizeContent } from './geminiService.ts';
+import { summarizeMultipleContents } from './geminiService.ts';
 
 // Mock database for the external File Search service
 const fileSearchIndex: Record<string, { files: Pick<FileObject, 'id' | 'name' | 'summary'>[] }> = {};
@@ -19,8 +19,7 @@ export const fileSearchService = {
   },
 
   /**
-   * Wipes and re-indexes all files for a given client.
-   * This is the "delete all and re-upload" logic.
+   * Wipes and re-indexes all files for a given client using a batch summarization process.
    * @param client The client object.
    * @param filesFromDrive The latest list of files from Google Drive.
    * @param fileSearchApiKey The user's API key for this service.
@@ -35,26 +34,43 @@ export const fileSearchService = {
         throw new Error("Invalid File Search API Key.");
     }
     
-    console.log(`Starting sync for client ${client.name}. Wiping old index.`);
-    // In a real API: POST /sync { clientId, files... }
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay for wipe + upload
+    console.log(`Starting batch sync for client ${client.name}. Wiping old index.`);
+    await new Promise(resolve => setTimeout(resolve, 200)); // Simulate network delay for wipe
+
+    // Call the new batch summarization function once for all files.
+    const summaryMap = await summarizeMultipleContents(filesFromDrive, fileSearchApiKey);
     
-    // Process and summarize each file before "uploading"
-    const processedFiles: FileObject[] = await Promise.all(filesFromDrive.map(async (driveFile) => {
-        try {
-            // CRITICAL FIX: Pass the API key to the summarization service.
-            const summary = await summarizeContent(driveFile.content, fileSearchApiKey);
-            return { ...driveFile, summary, status: 'COMPLETED', statusMessage: 'Successfully indexed.' };
-        } catch (e) {
-            console.error(`Failed to summarize ${driveFile.name}`, e);
-            const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred during indexing.';
-            return { ...driveFile, summary: '', status: 'FAILED', statusMessage: errorMessage };
+    // Map the results from the summary map back to the file objects.
+    const processedFiles: FileObject[] = filesFromDrive.map(driveFile => {
+        const result = summaryMap.get(driveFile.id);
+        
+        if (result && result.summary && !result.error) {
+            return {
+                ...driveFile,
+                summary: result.summary,
+                status: 'COMPLETED',
+                statusMessage: 'Successfully indexed.',
+            };
+        } else {
+            const errorMessage = result?.error || 'An unknown error occurred during indexing.';
+            console.error(`Failed to summarize ${driveFile.name}: ${errorMessage}`);
+            return {
+                ...driveFile,
+                summary: '',
+                status: 'FAILED',
+                statusMessage: errorMessage,
+            };
         }
-    }));
+    });
+
+    // Update the mock index with successfully processed files
+    const successfullyProcessed = processedFiles
+        .filter(f => f.status === 'COMPLETED')
+        .map(({id, name, summary}) => ({id, name, summary}));
+
+    fileSearchIndex[client.id] = { files: successfullyProcessed };
     
-    // Update the mock index
-    fileSearchIndex[client.id] = { files: processedFiles.map(({id, name, summary}) => ({id, name, summary})) };
-    console.log(`Sync complete for client ${client.name}. Indexed ${processedFiles.length} files.`);
+    console.log(`Sync complete for client ${client.name}. Processed ${processedFiles.length} files.`);
     console.log("Current Index State:", fileSearchIndex);
     
     return processedFiles;
