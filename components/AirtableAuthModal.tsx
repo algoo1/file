@@ -6,7 +6,7 @@ import { SystemSettings } from '../types.ts';
 interface AirtableAuthModalProps {
   onClose: () => void;
   initialSettings: SystemSettings;
-  onSave: (creds: { clientId: string, clientSecret: string }) => Promise<void>;
+  onSave: (creds: { clientId: string }) => Promise<void>;
 }
 
 const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
@@ -15,7 +15,6 @@ const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
   onSave,
 }) => {
   const [clientId, setClientId] = useState(initialSettings.airtable_client_id || '');
-  const [clientSecret, setClientSecret] = useState(initialSettings.airtable_client_secret || '');
   const [isSaving, setIsSaving] = useState(false);
   const [copiedUri, setCopiedUri] = useState(false);
 
@@ -24,7 +23,7 @@ const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await onSave({ clientId, clientSecret });
+      await onSave({ clientId });
       // On success, the modal will be closed by the parent component
     } catch (error) {
       // Error is alerted in the parent component
@@ -62,16 +61,6 @@ const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
                 className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
                 />
             </div>
-             <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Airtable Client Secret</label>
-                <input
-                type="password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder="Enter your Airtable OAuth App Client Secret"
-                className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-                />
-            </div>
             </div>
 
             <div className="bg-gray-900/50 p-4 rounded-md mt-6 border border-gray-700">
@@ -100,7 +89,7 @@ const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
                     </li>
                      <li>
                         <strong>Copy Credentials</strong>
-                        <p className="text-xs text-gray-400 ml-4 mt-1">After saving, Airtable will provide a <strong className="text-gray-300">Client ID</strong> and a <strong className="text-gray-300">Client Secret</strong>. Copy both and paste them into the fields above.</p>
+                        <p className="text-xs text-gray-400 ml-4 mt-1">After saving, Airtable will provide a <strong className="text-gray-300">Client ID</strong>. Copy it and paste it into the field above.</p>
                     </li>
                 </ol>
             </div>
@@ -109,7 +98,7 @@ const AirtableAuthModal: React.FC<AirtableAuthModalProps> = ({
         <div className="mt-6 pt-4 border-t border-gray-700">
           <button
             onClick={handleSave}
-            disabled={isSaving || !clientId || !clientSecret}
+            disabled={isSaving || !clientId}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
           >
             {isSaving ? 'Saving...' : 'Save Airtable Settings'}

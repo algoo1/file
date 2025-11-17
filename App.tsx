@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings, SyncedFile, Tag } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import { airtableService } from './services/airtableService.ts';
+import { googleDriveService } from './services/googleDriveService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
 import ClientManager from './components/ClientManager.tsx';
 import FileManager from './components/FileManager.tsx';
@@ -84,6 +85,17 @@ const App: React.FC = () => {
     };
     initializeApp();
   }, []);
+  
+  // Effect to initialize Google Drive client on startup
+  useEffect(() => {
+    if (settings?.is_google_drive_connected && settings.google_api_key && settings.google_client_id) {
+      console.log("Initializing Google Drive client on app startup...");
+      googleDriveService.init(settings.google_api_key, settings.google_client_id).catch(error => {
+        console.warn("Failed to silently initialize Google Drive client on startup:", error);
+        // This is not a fatal error, user can reconnect manually.
+      });
+    }
+  }, [settings]);
 
   // Background sync effect
   useEffect(() => {
@@ -143,11 +155,10 @@ const App: React.FC = () => {
     }
   }, [handleSaveSettings]);
 
-  const handleSaveAirtableSettings = useCallback(async (creds: { clientId: string; clientSecret: string }) => {
+  const handleSaveAirtableSettings = useCallback(async (creds: { clientId: string; }) => {
     try {
       await handleSaveSettings({ 
         airtable_client_id: creds.clientId,
-        airtable_client_secret: creds.clientSecret,
        });
       const finalSettings = await apiService.saveSettings({ is_airtable_connected: true });
       setSettings(finalSettings);

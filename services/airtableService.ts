@@ -131,7 +131,7 @@ export const airtableService = {
   },
 
   refreshToken: async (client: Client, settings: SystemSettings): Promise<Partial<Client>> => {
-    if (!client.airtable_refresh_token || !settings.airtable_client_id || !settings.airtable_client_secret) {
+    if (!client.airtable_refresh_token || !settings.airtable_client_id) {
         throw new Error("Missing credentials for token refresh.");
     }
     
@@ -141,13 +141,10 @@ export const airtableService = {
         grant_type: 'refresh_token',
     });
 
-    const authHeader = 'Basic ' + btoa(`${settings.airtable_client_id}:${settings.airtable_client_secret}`);
-
     const response = await safeFetch(AIRTABLE_TOKEN_URL, {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': authHeader
         },
         body: params.toString(),
     });
