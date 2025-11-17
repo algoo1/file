@@ -17,6 +17,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
+  const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
+
   useEffect(() => {
     const initializeApp = async () => {
       try {
@@ -35,6 +37,37 @@ const App: React.FC = () => {
     };
     initializeApp();
   }, []);
+
+  // Background sync effect
+  useEffect(() => {
+    if (!selectedClient || selectedClient.syncInterval === 'MANUAL' || !selectedClient.googleDriveFolderUrl) {
+      return; // Do nothing if no client, manual sync, or no folder URL
+    }
+
+    const syncClientData = async () => {
+      if (!selectedClient?.id) return;
+      console.log(`Auto-syncing for client: ${selectedClient.name} with interval ${selectedClient.syncInterval}ms`);
+      try {
+        const result = await apiService.syncDataSource(selectedClient.id);
+        if (result.status === 'changed') {
+          // Use functional update to avoid capturing stale state in the interval closure
+          setClients(prevClients => prevClients.map(c => c.id === result.client.id ? result.client : c));
+          console.log(`Auto-sync successful for ${selectedClient.name}: files updated.`);
+        } else {
+          console.log(`Auto-sync successful for ${selectedClient.name}: no changes detected.`);
+        }
+      } catch (error) {
+        console.error(`Auto-sync failed for ${selectedClient.name}:`, error);
+        // In a real app, you might want to add logic to stop syncing after several failures.
+      }
+    };
+
+    const intervalId = setInterval(syncClientData, selectedClient.syncInterval as number);
+
+    // Cleanup function to clear the interval when the component unmounts or dependencies change
+    return () => clearInterval(intervalId);
+  }, [selectedClient?.id, selectedClient?.syncInterval, selectedClient?.googleDriveFolderUrl]);
+
 
   const handleSaveSettings = useCallback(async (newSettings: Partial<SystemSettings>) => {
     try {
@@ -83,6 +116,11 @@ const App: React.FC = () => {
     const updatedClient = await apiService.updateClient(clientId, { googleDriveFolderUrl: url });
     setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
   }, []);
+
+  const handleSetSyncInterval = useCallback(async (clientId: string, interval: number | 'MANUAL') => {
+    const updatedClient = await apiService.updateClient(clientId, { syncInterval: interval });
+    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+  }, []);
   
   const handleAddTag = useCallback(async (clientId: string, tagName: string) => {
     const updatedClient = await apiService.addTagToClient(clientId, tagName);
@@ -93,9 +131,6 @@ const App: React.FC = () => {
     const updatedClient = await apiService.removeTagFromClient(clientId, tagId);
     setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
   }, []);
-
-
-  const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
 
   const handleSearch = useCallback(async (query: string) => {
     if (!selectedClient) {
@@ -159,6 +194,7 @@ const App: React.FC = () => {
               onSetFolderUrl={handleSetFolderUrl}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
+              onSetSyncInterval={handleSetSyncInterval}
             />
           )}
         </aside>
@@ -180,7 +216,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.0.3</p>
+        <p>v1.0.4</p>
       </footer>
 
       {isAuthModalOpen && settings && (

@@ -29,6 +29,7 @@ export interface Client {
   googleDriveFolderUrl: string | null;
   syncedFiles: SyncedFile[];
   tags: Tag[];
+  syncInterval: number | 'MANUAL'; // in milliseconds, or 'MANUAL' for on-demand
 }
 
 export interface SystemSettings {

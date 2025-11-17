@@ -49,6 +49,7 @@ export const databaseService = {
             googleDriveFolderUrl: null,
             syncedFiles: [],
             tags: [],
+            syncInterval: 'MANUAL',
         };
         clients = [...clients, newClient];
         return { ...newClient };

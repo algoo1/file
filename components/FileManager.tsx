@@ -9,6 +9,7 @@ interface FileManagerProps {
   onSetFolderUrl: (clientId: string, url: string) => Promise<void>;
   onAddTag: (clientId: string, tagName: string) => void;
   onRemoveTag: (clientId: string, tagId: string) => void;
+  onSetSyncInterval: (clientId: string, interval: number | 'MANUAL') => void;
 }
 
 const statusIndicator = (status: SyncedFile['status']) => {
@@ -41,6 +42,7 @@ const FileManager: React.FC<FileManagerProps> = ({
     onSetFolderUrl, 
     onAddTag,
     onRemoveTag,
+    onSetSyncInterval,
 }) => {
   const [folderUrl, setFolderUrl] = useState(client.googleDriveFolderUrl || '');
   const [newTagName, setNewTagName] = useState('');
@@ -59,7 +61,7 @@ const FileManager: React.FC<FileManagerProps> = ({
     setIsSavingUrl(true);
     setSaveUrlSuccess(false);
     try {
-      await onSetFolderUrl(client.id, folderUrl);
+      await onSetFolderUrl(client.id, folderUrl.trim());
       setSaveUrlSuccess(true);
       setTimeout(() => setSaveUrlSuccess(false), 2500);
     } catch (error) {
@@ -77,12 +79,18 @@ const FileManager: React.FC<FileManagerProps> = ({
     }
   };
 
+  const handleIntervalChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    const interval = value === 'MANUAL' ? 'MANUAL' : parseInt(value, 10);
+    onSetSyncInterval(client.id, interval);
+  };
+
   const renderContent = () => {
     if (!isGoogleDriveConnected) {
         return <p className="text-gray-500 text-sm text-center py-4">Please connect to Google Drive in Settings first.</p>;
     }
 
-    const hasUnchangedUrl = folderUrl === (client.googleDriveFolderUrl || '');
+    const hasUnchangedUrl = folderUrl.trim() === (client.googleDriveFolderUrl || '');
 
     return (
         <>
@@ -117,22 +125,49 @@ const FileManager: React.FC<FileManagerProps> = ({
                     ) : 'Save'}
                 </button>
             </form>
+
+            <div className="border-t border-gray-700 pt-4 mt-4">
+                <h3 className="text-md font-semibold text-gray-300 mb-2">Sync Settings</h3>
+                <label htmlFor="sync-interval" className="block text-sm font-medium text-gray-400 mb-1">
+                    Sync Frequency
+                </label>
+                <select
+                    id="sync-interval"
+                    value={client.syncInterval}
+                    onChange={handleIntervalChange}
+                    className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600 disabled:opacity-50"
+                    disabled={!client.googleDriveFolderUrl}
+                >
+                    <option value="MANUAL">Manual (On Search)</option>
+                    <option value={5000}>Every 5 seconds</option>
+                    <option value={60000}>Every minute</option>
+                    <option value={600000}>Every 10 minutes</option>
+                    <option value={3600000}>Every hour</option>
+                    <option value={7200000}>Every 2 hours</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-2">
+                    Controls how often to check Google Drive for file changes. Data is always synced before performing a search.
+                </p>
+            </div>
             
-            <div className="max-h-60 overflow-y-auto pr-1">
-                {client.syncedFiles.length > 0 ? (
-                    <ul className="space-y-2">
-                    {client.syncedFiles.map(file => (
-                        <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
-                        <div className="flex items-center gap-2 truncate">
-                            {statusIndicator(file.status)}
-                            <span className="truncate" title={file.name}>{file.name}</span>
-                        </div>
-                        </li>
-                    ))}
-                    </ul>
-                ) : (
-                    <p className="text-gray-500 text-sm text-center py-4">No files found in linked folder, or folder not linked yet.</p>
-                )}
+            <div className="border-t border-gray-700 pt-4 mt-4">
+                 <h3 className="text-md font-semibold text-gray-300 mb-2">Synced Files</h3>
+                 <div className="max-h-60 overflow-y-auto pr-1">
+                    {client.syncedFiles.length > 0 ? (
+                        <ul className="space-y-2">
+                        {client.syncedFiles.map(file => (
+                            <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
+                            <div className="flex items-center gap-2 truncate">
+                                {statusIndicator(file.status)}
+                                <span className="truncate" title={file.name}>{file.name}</span>
+                            </div>
+                            </li>
+                        ))}
+                        </ul>
+                    ) : (
+                        <p className="text-gray-500 text-sm text-center py-4">No files found in linked folder, or folder not linked yet.</p>
+                    )}
+                </div>
             </div>
 
             <div className="border-t border-gray-700 pt-4 mt-4">
