@@ -19,11 +19,11 @@ export const fileSearchService = {
   },
 
   /**
-   * Wipes and re-indexes all files for a given client using a batch summarization process.
+   * Wipes and re-indexes all files for a given client using a robust, chunked summarization process.
    * @param client The client object.
    * @param filesFromDrive The latest list of files from Google Drive.
    * @param fileSearchApiKey The user's API key for this service.
-   * @returns The updated list of indexed files.
+   * @returns The updated list of indexed files with their final statuses.
    */
   syncClientFiles: async (
     client: Client, 
@@ -34,46 +34,67 @@ export const fileSearchService = {
         throw new Error("Invalid File Search API Key.");
     }
     
-    console.log(`Starting batch sync for client ${client.name}. Wiping old index.`);
-    await new Promise(resolve => setTimeout(resolve, 200)); // Simulate network delay for wipe
+    console.log(`Starting chunked sync for client ${client.name}. Wiping old index.`);
+    await new Promise(resolve => setTimeout(resolve, 200)); // Simulate wipe
 
-    // Call the new batch summarization function once for all files.
-    const summaryMap = await summarizeMultipleContents(filesFromDrive, fileSearchApiKey);
+    const CHUNK_SIZE = 15; // Process up to 15 files per API call for reliability
+    const allProcessedFiles: FileObject[] = [];
     
-    // Map the results from the summary map back to the file objects.
-    const processedFiles: FileObject[] = filesFromDrive.map(driveFile => {
-        const result = summaryMap.get(driveFile.id);
+    // Process files in manageable chunks to improve reliability and avoid API limits.
+    for (let i = 0; i < filesFromDrive.length; i += CHUNK_SIZE) {
+        const chunk = filesFromDrive.slice(i, i + CHUNK_SIZE);
+        console.log(`Processing chunk ${Math.floor(i / CHUNK_SIZE) + 1} with ${chunk.length} files...`);
         
-        if (result && result.summary && !result.error) {
-            return {
-                ...driveFile,
-                summary: result.summary,
-                status: 'COMPLETED',
-                statusMessage: 'Successfully indexed.',
-            };
-        } else {
-            const errorMessage = result?.error || 'An unknown error occurred during indexing.';
-            console.error(`Failed to summarize ${driveFile.name}: ${errorMessage}`);
-            return {
+        try {
+            const summaryMap = await summarizeMultipleContents(chunk, fileSearchApiKey);
+            
+            // Map the results from this chunk back to full file objects
+            const chunkProcessedFiles = chunk.map(driveFile => {
+                const result = summaryMap.get(driveFile.id);
+                if (result && result.summary && !result.error) {
+                    return {
+                        ...driveFile,
+                        summary: result.summary,
+                        status: 'COMPLETED',
+                        statusMessage: 'Successfully indexed.',
+                    } as FileObject;
+                } else {
+                    const errorMessage = result?.error || 'An unknown error occurred during indexing.';
+                    console.error(`Failed to summarize ${driveFile.name}: ${errorMessage}`);
+                    return {
+                        ...driveFile,
+                        summary: '',
+                        status: 'FAILED',
+                        statusMessage: errorMessage,
+                    } as FileObject;
+                }
+            });
+            allProcessedFiles.push(...chunkProcessedFiles);
+
+        } catch (chunkError) {
+            console.error(`A critical error occurred while processing a chunk for client ${client.name}.`, chunkError);
+            // If the entire API call for the chunk fails, mark all files in that chunk as failed.
+            const chunkFailedFiles = chunk.map(driveFile => ({
                 ...driveFile,
                 summary: '',
                 status: 'FAILED',
-                statusMessage: errorMessage,
-            };
+                statusMessage: chunkError instanceof Error ? chunkError.message : 'The entire processing batch for this file failed.',
+            } as FileObject));
+            allProcessedFiles.push(...chunkFailedFiles);
         }
-    });
+    }
 
-    // Update the mock index with successfully processed files
-    const successfullyProcessed = processedFiles
+    // Update the mock index with only the successfully processed files from all chunks
+    const successfullyProcessed = allProcessedFiles
         .filter(f => f.status === 'COMPLETED')
         .map(({id, name, summary}) => ({id, name, summary}));
 
     fileSearchIndex[client.id] = { files: successfullyProcessed };
     
-    console.log(`Sync complete for client ${client.name}. Processed ${processedFiles.length} files.`);
+    console.log(`Sync complete for client ${client.name}. Processed ${allProcessedFiles.length} files.`);
     console.log("Current Index State:", fileSearchIndex);
     
-    return processedFiles;
+    return allProcessedFiles;
   },
 
   /**
