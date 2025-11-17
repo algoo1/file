@@ -95,40 +95,47 @@ export const apiService = {
     await fileSearchService.clearIndexForClient(clientId);
 
 
-    // 3. Process each file/record sequentially
+    // 3. Process each file/record in parallel batches for speed
     const allProcessedFiles: FileObject[] = [];
-    for (const fileMeta of allSourceFilesMeta) {
-        let finalFileObject: FileObject;
-        
-        try {
-            onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Fetching content...' }});
-            
-            let content = '';
-            if (fileMeta.source === 'GOOGLE_DRIVE') {
-                content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
-            } else if (fileMeta.source === 'AIRTABLE') {
-                content = await airtableService.getRecordContent(client, settings.airtable_client_id, fileMeta.id);
-            }
+    const batchSize = 5; // Process 5 items concurrently
 
-            onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Processing with AI...' }});
+    for (let i = 0; i < allSourceFilesMeta.length; i += batchSize) {
+        const batch = allSourceFilesMeta.slice(i, i + batchSize);
+
+        const processedBatch = await Promise.all(batch.map(async (fileMeta) => {
+            let finalFileObject: FileObject;
+            try {
+                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Fetching content...' }});
+                
+                let content = '';
+                if (fileMeta.source === 'GOOGLE_DRIVE') {
+                    content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
+                } else if (fileMeta.source === 'AIRTABLE') {
+                    content = await airtableService.getRecordContent(client, settings.airtable_client_id, fileMeta.id);
+                }
+
+                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Processing with AI...' }});
+                
+                const fileData = { ...fileMeta, content };
+                
+                finalFileObject = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
+                
+            } catch (error) {
+                 console.error(`Critical error processing item ${fileMeta.name} (${fileMeta.id}):`, error);
+                 finalFileObject = {
+                     ...fileMeta,
+                     content: '',
+                     summary: '',
+                     status: 'FAILED',
+                     statusMessage: error instanceof Error ? error.message : 'A critical failure occurred during processing.'
+                 };
+            }
             
-            const fileData = { ...fileMeta, content };
-            
-            finalFileObject = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
-            
-        } catch (error) {
-             console.error(`Critical error processing item ${fileMeta.name} (${fileMeta.id}):`, error);
-             finalFileObject = {
-                 ...fileMeta,
-                 content: '',
-                 summary: '',
-                 status: 'FAILED',
-                 statusMessage: error instanceof Error ? error.message : 'A critical failure occurred during processing.'
-             };
-        }
-        
-        onProgress({ type: 'FILE_UPDATE', update: { source_item_id: finalFileObject.id, status: finalFileObject.status, status_message: finalFileObject.statusMessage, type: finalFileObject.type }});
-        allProcessedFiles.push(finalFileObject);
+            onProgress({ type: 'FILE_UPDATE', update: { source_item_id: finalFileObject.id, status: finalFileObject.status, status_message: finalFileObject.statusMessage, type: finalFileObject.type }});
+            return finalFileObject;
+        }));
+
+        allProcessedFiles.push(...processedBatch);
     }
 
     // 4. Update the client's file list in our database with the final state

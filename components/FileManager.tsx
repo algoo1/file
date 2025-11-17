@@ -277,25 +277,34 @@ const FileManager: React.FC<FileManagerProps> = ({
 
   const getAirtableAggregateStatus = (): { status: 'COMPLETED' | 'FAILED' | 'SYNCING' | 'IDLE', text: string, icon: React.ReactNode } => {
       const airtableRecords = client.synced_files.filter(f => f.source === 'AIRTABLE');
-      
-      if (airtableRecords.length > 0) {
+      const totalAirtableRecords = airtableRecords.length;
+
+      if (isSyncing) {
+          return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+      }
+
+      if (totalAirtableRecords > 0) {
           if (airtableRecords.some(r => r.status === 'FAILED')) {
               return { status: 'FAILED', text: 'Sync failed', icon: <XCircleIcon className="w-5 h-5 text-red-500" /> };
           }
           if (airtableRecords.every(r => r.status === 'COMPLETED')) {
-              return { status: 'COMPLETED', text: 'Synced', icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
+              const recordText = totalAirtableRecords === 1 ? 'record' : 'records';
+              return { status: 'COMPLETED', text: `Synced (${totalAirtableRecords} ${recordText})`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
           }
-          // If it reaches here, some are syncing, indexing, or still idle within a sync operation
-          return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+           // Some files are still being processed from a previous onProgress update
+          return { status: 'SYNCING', text: 'Processing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
       }
       
-      // No records processed yet
-      if (isSyncing && (client.airtable_api_key || client.airtable_access_token)) {
-          return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+      // We can't distinguish between "never synced" and "synced and found 0 records" without a dedicated timestamp on the client.
+      // However, we can confirm a successful sync *did* run if there are other files present (from Drive).
+      if (client.synced_files.length > 0 && client.synced_files.every(f => f.status === 'COMPLETED')) {
+          return { status: 'COMPLETED', text: `Synced (0 records)`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
       }
       
-      return { status: 'IDLE', text: 'Pending', icon: <ClockIcon className="w-5 h-5 text-gray-400" /> };
+      // "Ready to Sync" is a clearer initial state than "Pending".
+      return { status: 'IDLE', text: 'Ready to Sync', icon: <ClockIcon className="w-5 h-5 text-gray-400" /> };
   }
+
 
   return (
     <>
