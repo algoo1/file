@@ -3,6 +3,7 @@ import { Client, SyncedFile, Tag } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
 import { CheckIcon } from './icons/CheckIcon.tsx';
 import { RefreshIcon } from './icons/RefreshIcon.tsx';
+import { EyeIcon } from './icons/EyeIcon.tsx';
 
 interface FileManagerProps {
   client: Client;
@@ -15,20 +16,20 @@ interface FileManagerProps {
   isSyncing: boolean;
 }
 
-const statusIndicator = (status: SyncedFile['status']) => {
+const statusIndicatorClasses = (status: SyncedFile['status']) => {
     switch (status) {
         case 'SYNCING':
-            return <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" title="Syncing..."></div>;
+            return 'text-blue-500 animate-pulse';
         case 'INDEXING':
-            return <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse" title="Indexing..."></div>;
+            return 'text-yellow-500 animate-pulse';
         case 'COMPLETED':
-            return <div className="w-3 h-3 bg-green-500 rounded-full" title="Indexed"></div>;
+            return 'text-green-500';
         case 'FAILED':
-            return <div className="w-3 h-3 bg-red-500 rounded-full" title="Error"></div>;
+            return 'text-red-500';
         default:
-            return <div className="w-3 h-3 bg-gray-500 rounded-full" title="Idle"></div>;
+            return 'text-gray-500';
     }
-}
+};
 
 const TagPill: React.FC<{tag: Tag; onRemove: (tagId: string) => void}> = ({ tag, onRemove }) => (
     <div className="flex items-center bg-gray-600 text-gray-200 text-xs font-semibold px-2 py-1 rounded-full">
@@ -53,6 +54,8 @@ const FileManager: React.FC<FileManagerProps> = ({
   const [newTagName, setNewTagName] = useState('');
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [saveUrlSuccess, setSaveUrlSuccess] = useState(false);
+  const [viewingFile, setViewingFile] = useState<SyncedFile | null>(null);
+
 
   useEffect(() => {
     setFolderUrl(client.googleDriveFolderUrl || '');
@@ -195,18 +198,18 @@ const FileManager: React.FC<FileManagerProps> = ({
                         <ul className="space-y-2">
                         {client.syncedFiles.map(file => (
                             <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
-                            <div className="flex items-center gap-2 truncate">
-                                {statusIndicator(file.status)}
                                 <a
                                   href={`https://drive.google.com/file/d/${file.id}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="truncate text-gray-300 hover:text-blue-400 hover:underline"
+                                  className="truncate text-gray-300 hover:text-blue-400 hover:underline flex-grow"
                                   title={file.name}
                                 >
                                   {file.name}
                                 </a>
-                            </div>
+                                <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
+                                    <EyeIcon className="w-5 h-5" />
+                                </button>
                             </li>
                         ))}
                         </ul>
@@ -240,10 +243,39 @@ const FileManager: React.FC<FileManagerProps> = ({
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg flex flex-col">
-      <h2 className="text-lg font-semibold mb-3 text-white">Data Source Details</h2>
-      {renderContent()}
-    </div>
+    <>
+        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg flex flex-col">
+            <h2 className="text-lg font-semibold mb-3 text-white">Data Source Details</h2>
+            {renderContent()}
+        </div>
+
+        {viewingFile && (
+            <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm" onClick={() => setViewingFile(null)}>
+                <div className="bg-gray-800 rounded-lg shadow-2xl p-6 border border-gray-700 w-full max-w-md" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-start mb-3">
+                        <h3 className="text-lg font-semibold text-white">File Status Details</h3>
+                        <button onClick={() => setViewingFile(null)} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+                    </div>
+                    <div className="space-y-3 text-sm">
+                        <div>
+                            <p className="font-semibold text-gray-400">File Name</p>
+                            <p className="text-gray-200 break-all">{viewingFile.name}</p>
+                        </div>
+                         <div>
+                            <p className="font-semibold text-gray-400">Status</p>
+                            <p className={`font-semibold capitalize ${statusIndicatorClasses(viewingFile.status)}`}>{viewingFile.status}</p>
+                        </div>
+                        {viewingFile.statusMessage && (
+                             <div>
+                                <p className="font-semibold text-gray-400">Details</p>
+                                <p className="text-gray-300 bg-gray-900/50 p-2 rounded-md whitespace-pre-wrap">{viewingFile.statusMessage}</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+    </>
   );
 };
 

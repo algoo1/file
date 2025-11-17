@@ -5,6 +5,7 @@ export interface SyncedFile {
   id: string;
   name: string;
   status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
+  statusMessage?: string;
 }
 
 /** Represents a full file object used by services, including its content. */
@@ -13,8 +14,9 @@ export interface FileObject {
     name: string;
     type: 'pdf' | 'sheet';
     content: string;
-    summary: string; 
+    summary: string;
     status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
+    statusMessage?: string;
 }
 
 export interface Tag {

@@ -12,12 +12,12 @@ const ApiDetails: React.FC<ApiDetailsProps> = ({ client }) => {
 
   const endpoint = `${window.location.origin}/api/v1/search`; 
   
+  // Use the API key in the header for auth/identification, simplifying the payload.
   const curlCommand = `curl "${endpoint}" \\
   -H "x-api-key: ${client.apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "query": "Your question here",
-    "client_id": "${client.id}"
+    "query": "Your question here"
   }'`;
 
   const copyToClipboard = (text: string, type: 'key' | 'curl') => {

@@ -44,10 +44,11 @@ export const fileSearchService = {
         try {
             // CRITICAL FIX: Pass the API key to the summarization service.
             const summary = await summarizeContent(driveFile.content, fileSearchApiKey);
-            return { ...driveFile, summary, status: 'COMPLETED' };
+            return { ...driveFile, summary, status: 'COMPLETED', statusMessage: 'Successfully indexed.' };
         } catch (e) {
             console.error(`Failed to summarize ${driveFile.name}`, e);
-            return { ...driveFile, summary: '', status: 'FAILED' };
+            const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred during indexing.';
+            return { ...driveFile, summary: '', status: 'FAILED', statusMessage: errorMessage };
         }
     }));
     
