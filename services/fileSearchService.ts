@@ -1,19 +1,43 @@
-
-
 import { FileObject, Client } from '../types.ts';
 import { summarizeSingleContent } from './geminiService.ts';
+import MiniSearch from 'minisearch';
 
-// Mock database for the external File Search service
-// Using a Map for efficient per-file updates.
-const fileSearchIndex: Record<string, { files: Map<string, Pick<FileObject, 'id' | 'name' | 'summary'>> }> = {};
+// In-memory store for MiniSearch instances, one for each client.
+const clientSearchIndexes: Record<string, MiniSearch> = {};
 
-
-const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 'name' | 'summary'>) => {
-    if (!fileSearchIndex[clientId]) {
-        fileSearchIndex[clientId] = { files: new Map() };
+/**
+ * Initializes or retrieves a MiniSearch instance for a client.
+ * @param clientId The ID of the client.
+ * @returns A MiniSearch instance.
+ */
+const getClientIndex = (clientId: string) => {
+    if (!clientSearchIndexes[clientId]) {
+        clientSearchIndexes[clientId] = new MiniSearch({
+            fields: ['name', 'summary'], // fields to index for full-text search
+            storeFields: ['name', 'summary'], // fields to return with search results
+            searchOptions: {
+                prefix: true, // support "prefix search" (e.g., "star" matches "starry")
+                fuzzy: 0.2,   // allow for some typos
+            }
+        });
     }
-    fileSearchIndex[clientId].files.set(file.id, file);
-    console.log(`Indexed file "${file.name}" for client ${clientId}. Index size: ${fileSearchIndex[clientId].files.size}`);
+    return clientSearchIndexes[clientId];
+};
+
+/**
+ * Adds or updates a file in the client's MiniSearch index.
+ * @param clientId The ID of the client.
+ * @param file The file object containing the data to index.
+ */
+const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 'name' | 'summary'>) => {
+    const index = getClientIndex(clientId);
+    // Use a Map-like interface for documents, with `id` being the unique identifier.
+    if (index.has(file.id)) {
+        index.replace(file);
+    } else {
+        index.add(file);
+    }
+    console.log(`Indexed file "${file.name}" for client ${clientId}. Index now contains ${index.documentCount} documents.`);
 };
 
 export const fileSearchService = {
@@ -29,23 +53,24 @@ export const fileSearchService = {
   },
 
   /**
-   * Wipes the index for a given client. This is called at the start of a sync operation.
+   * Wipes the search index for a given client.
    * @param clientId The ID of the client whose index should be cleared.
    */
   clearIndexForClient: async (clientId: string): Promise<void> => {
-    if (fileSearchIndex[clientId]) {
-        delete fileSearchIndex[clientId];
+    if (clientSearchIndexes[clientId]) {
+        // Re-initialize the MiniSearch instance to clear it.
+        delete clientSearchIndexes[clientId];
         console.log(`Cleared search index for client ${clientId}.`);
     }
     await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async
   },
   
   /**
-   * Processes and indexes a single file. It summarizes the content and updates the search index.
+   * Processes a single file, summarizes it, and adds it to the local search index.
    * @param client The client object.
    * @param file The file data from Drive, including its content.
-   * @param fileSearchApiKey The user's API key for this service.
-   * @returns The fully processed file object with its final status.
+   * @param fileSearchApiKey The user's API key for Gemini.
+   * @returns The fully processed file object.
    */
   indexSingleFile: async (
     client: Client,
@@ -62,7 +87,7 @@ export const fileSearchService = {
       statusMessage: result.error || 'Successfully indexed.',
     };
     
-    // Only add successfully processed files to the live search index.
+    // Only add successfully processed files to the local search index.
     if (processedFile.status === 'COMPLETED') {
         addOrUpdateFileInIndex(client.id, processedFile);
     }
@@ -72,11 +97,9 @@ export const fileSearchService = {
 
 
   /**
-   * Queries the indexed data for a specific client, with optional image input.
-   * @param client The client object.
-   * @param query The user's text search query.
-   * @param fileSearchApiKey The user's API key for this service.
-   * @param image Optional image data for multimodal search.
+   * Queries the data using a cost-effective two-step process.
+   * 1. Performs a fast, local search to find the most relevant files.
+   * 2. Sends only the top results to the AI for a final, synthesized answer.
    */
   query: async (
     client: Client,
@@ -88,38 +111,53 @@ export const fileSearchService = {
         if (!(await fileSearchService.validateApiKey(fileSearchApiKey))) {
             return "Error: Invalid File Search API Key.";
         }
-
-        console.log(`Querying data for client ${client.name} with query: "${query}" and image: ${image ? 'present' : 'absent'}`);
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-
-        const clientIndex = fileSearchIndex[client.id];
-        if (!clientIndex || clientIndex.files.size === 0) {
+        
+        const localIndex = getClientIndex(client.id);
+        if (localIndex.documentCount === 0) {
             return "There is no data indexed for this client. Please check the Google Drive sync.";
         }
+
+        // STEP 1: Fast local search to pre-filter relevant documents.
+        // If there's an image, we can't pre-filter effectively, so we take a few recent files.
+        // If there's text, we do a full-text search.
+        let relevantFiles;
+        if (query.trim()) {
+            const searchResults = localIndex.search(query, {
+                fields: ['name', 'summary'],
+                combineWith: 'AND',
+            });
+            // Take the top 5 most relevant results from the local search.
+            relevantFiles = searchResults.slice(0, 5); 
+        } else {
+            // If it's an image-only query, we can't do a text search.
+            // A simple strategy is to take the most recently added documents. This could be improved.
+            // FIX: MiniSearch does not have a public API to get all documents.
+            // Accessing the internal `_documents` map is a workaround to retrieve
+            // all stored items for context in an image-only search.
+            relevantFiles = Array.from((localIndex as any)._documents.values()).slice(-3);
+        }
         
-        const context = Array.from(clientIndex.files.values())
+        if (relevantFiles.length === 0) {
+             return "I could not find any relevant documents for your query.";
+        }
+
+        const context = relevantFiles
             .map(f => `File: ${f.name}\n${f.summary}`)
             .join('\n\n---\n\n');
         
-        const MAX_CONTEXT_LENGTH = 800000;
-        let truncatedContext = context;
-        if (truncatedContext.length > MAX_CONTEXT_LENGTH) {
-            console.warn(`Context length is very large (${truncatedContext.length} chars). Truncating to ${MAX_CONTEXT_LENGTH} chars.`);
-            truncatedContext = truncatedContext.substring(0, MAX_CONTEXT_LENGTH);
-        }
-        
-        const promptText = `You are an intelligent search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context from indexed files and the user-provided image if available.
+        // STEP 2: Call the AI with a much smaller, more relevant context.
+        const promptText = `You are an intelligent search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context from a pre-filtered list of relevant files and the user-provided image if available.
 
 - Analyze the user's query and image (if provided) to understand their intent.
-- Scrutinize the provided "Indexed Information" to find the most relevant passages or file descriptions.
+- Scrutinize the provided "Relevant Information" to synthesize an answer.
 - If an image is provided, use it as the primary subject of the query. Find information about what is depicted in the image from the indexed text.
 - Synthesize an answer directly from the information found.
 - If the information is not available in the context, you MUST respond with: "I could not find an answer to your question in the available documents."
 - Do not use any external knowledge.
 
-Indexed Information:
+Relevant Information:
 ---
-${truncatedContext}
+${context}
 ---
 
 User Query: "${query}"

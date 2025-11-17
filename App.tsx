@@ -1,5 +1,3 @@
-
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings, SyncedFile } from './types.ts';
 import { apiService } from './services/apiService.ts';
@@ -43,18 +41,18 @@ const App: React.FC = () => {
 
   // Background sync effect
   useEffect(() => {
-    if (!selectedClient || selectedClient.syncInterval === 'MANUAL' || !selectedClient.googleDriveFolderUrl) {
-      return; // Do nothing if no client, manual sync, or no folder URL
+    const hasDataSource = selectedClient?.googleDriveFolderUrl || (selectedClient?.airtableApiKey && selectedClient?.airtableBaseId && selectedClient?.airtableTableId);
+
+    if (!selectedClient || selectedClient.syncInterval === 'MANUAL' || !hasDataSource) {
+      return; // Do nothing if no client, manual sync, or no data source
     }
 
     const syncClientData = async () => {
       if (!selectedClient?.id) return;
       console.log(`Auto-syncing for client: ${selectedClient.name} with interval ${selectedClient.syncInterval}ms`);
       try {
-        // Auto-syncs don't need real-time progress updates in the UI, so we pass a no-op callback.
         const result = await apiService.syncDataSource(selectedClient.id, () => {});
         if (result.status === 'changed') {
-          // Use functional update to avoid capturing stale state in the interval closure
           setClients(prevClients => prevClients.map(c => c.id === result.client.id ? result.client : c));
           console.log(`Auto-sync successful for ${selectedClient.name}: files updated.`);
         } else {
@@ -62,15 +60,13 @@ const App: React.FC = () => {
         }
       } catch (error) {
         console.error(`Auto-sync failed for ${selectedClient.name}:`, error);
-        // In a real app, you might want to add logic to stop syncing after several failures.
       }
     };
 
     const intervalId = setInterval(syncClientData, selectedClient.syncInterval as number);
 
-    // Cleanup function to clear the interval when the component unmounts or dependencies change
     return () => clearInterval(intervalId);
-  }, [selectedClient?.id, selectedClient?.syncInterval, selectedClient?.googleDriveFolderUrl]);
+  }, [selectedClient?.id, selectedClient?.syncInterval, selectedClient?.googleDriveFolderUrl, selectedClient?.airtableApiKey]);
 
 
   const handleSaveSettings = useCallback(async (newSettings: Partial<SystemSettings>) => {
@@ -81,7 +77,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Failed to save settings:", error);
       alert("Failed to save settings.");
-      throw error; // re-throw for component to handle
+      throw error;
     }
   }, []);
   
@@ -92,15 +88,15 @@ const App: React.FC = () => {
         googleClientId: creds.clientId,
       });
       await apiService.connectGoogleDrive(creds);
-      const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: true }); // Ensure state is correct
+      const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: true });
       setSettings(finalSettings);
       setIsAuthModalOpen(false);
     } catch (error) {
-      const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: false }); // Ensure state is correct
+      const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: false });
       setSettings(finalSettings);
       console.error("Google Drive connection failed:", error);
       alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
-      throw error; // Re-throw to keep modal open
+      throw error;
     }
   }, [handleSaveSettings]);
 
@@ -121,6 +117,15 @@ const App: React.FC = () => {
     setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
   }, []);
 
+   const handleSetAirtableDetails = useCallback(async (clientId: string, details: { apiKey: string, baseId: string, tableId: string }) => {
+    const updatedClient = await apiService.updateClient(clientId, { 
+        airtableApiKey: details.apiKey,
+        airtableBaseId: details.baseId,
+        airtableTableId: details.tableId,
+    });
+    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+  }, []);
+
   const handleSetSyncInterval = useCallback(async (clientId: string, interval: number | 'MANUAL') => {
     const updatedClient = await apiService.updateClient(clientId, { syncInterval: interval });
     setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
@@ -128,24 +133,23 @@ const App: React.FC = () => {
 
   const handleSyncNow = useCallback(async (clientId: string) => {
     const client = clients.find(c => c.id === clientId);
-    if (!client?.googleDriveFolderUrl) {
-        alert("Please set a Google Drive folder URL before syncing.");
+    const hasDataSource = client?.googleDriveFolderUrl || (client?.airtableApiKey && client?.airtableBaseId && client?.airtableTableId);
+
+    if (!hasDataSource) {
+        alert("Please configure at least one data source (Google Drive or Airtable) before syncing.");
         return;
     }
 
     setIsSyncingClient(clientId);
     
-    // Define the real-time progress handler for the UI
     const onProgress = (event: { type: 'INITIAL_LIST', files: SyncedFile[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { id: string } }) => {
         setClients(prevClients => 
             prevClients.map(c => {
                 if (c.id === clientId) {
                     if (event.type === 'INITIAL_LIST') {
-                        // Set the initial list of files to be processed
                         return { ...c, syncedFiles: event.files };
                     }
                     if (event.type === 'FILE_UPDATE') {
-                        // Update the status of a single file
                         const newSyncedFiles = c.syncedFiles.map(f =>
                             f.id === event.update.id ? { ...f, ...event.update } : f
                         );
@@ -158,9 +162,7 @@ const App: React.FC = () => {
     };
 
     try {
-        // The service orchestrates the sync and calls onProgress to update the UI
         const result = await apiService.syncDataSource(clientId, onProgress);
-        // Do a final state reconciliation to ensure consistency
         setClients(prevClients => prevClients.map(c => c.id === clientId ? result.client : c));
     } catch (error) {
         console.error("Manual sync failed:", error);
@@ -181,17 +183,8 @@ const App: React.FC = () => {
   }, []);
 
   const handleSearch = useCallback(async (query: string, image?: { data: string; mimeType: string }) => {
-    if (!selectedClient) {
-        return "No client selected.";
-    }
-    if (!settings?.fileSearchServiceApiKey) {
-        return "Error: File Search Service API Key is not configured in Settings.";
-    }
-    
-    // A search does not trigger a full re-sync anymore to avoid high costs.
-    // Manual or scheduled syncs are responsible for keeping data fresh.
-    // We could add a check here for stale data in the future if needed.
-    
+    if (!selectedClient) return "No client selected.";
+    if (!settings?.fileSearchServiceApiKey) return "Error: File Search Service API Key is not configured in Settings.";
     return await fileSearchService.query(selectedClient, query, settings.fileSearchServiceApiKey, image);
   }, [selectedClient, settings]);
 
@@ -232,6 +225,7 @@ const App: React.FC = () => {
               client={selectedClient}
               isGoogleDriveConnected={!!settings?.isGoogleDriveConnected}
               onSetFolderUrl={handleSetFolderUrl}
+              onSetAirtableDetails={handleSetAirtableDetails}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               onSetSyncInterval={handleSetSyncInterval}

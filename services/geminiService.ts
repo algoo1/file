@@ -1,5 +1,3 @@
-
-
 import { GoogleGenAI } from "@google/genai";
 import { FileObject } from '../types.ts';
 
@@ -42,19 +40,37 @@ export async function summarizeSingleContent(
   let contents: any;
 
   if (file.type === 'image') {
-    // Multimodal prompt for image description
-    const prompt = `You are an expert image analysis AI. Your goal is to generate a detailed, structured description of the following image for a search index.
+    // Advanced multimodal prompt for structured data extraction and description
+    const prompt = `You are an advanced AI assistant specializing in multimodal data extraction and analysis. Your task is to process the provided image and generate a structured, text-based representation of its content for a search index. Your output should be optimized for keyword-based and semantic search.
 
-Follow these instructions:
-1.  **Main Subject:** Clearly identify the primary subject(s) of the image.
-2.  **Objects & Environment:** List all significant objects, items, and describe the surrounding environment.
-3.  **Text Content:** Transcribe any visible text, numbers, or labels accurately.
-4.  **Key Attributes:** Note colors, shapes, textures, and other visual details.
-5.  **Inferred Context:** Briefly infer the purpose, context, or category of the image (e.g., "product photo", "document screenshot", "architectural diagram").
+**Image Name:** ${file.name}
 
-Base your description *only* on the provided image.
+**Instructions:**
 
-Image Name: ${file.name}`;
+1.  **Analyze Image Type:** First, determine the type of image. Is it a document, a spreadsheet, a receipt, a product label, a diagram, or a photograph?
+
+2.  **Prioritize Structured Data Extraction:**
+    *   **If the image contains text, tables, or lists (like a screenshot of a spreadsheet, an invoice, or a price list):**
+        *   Transcribe **ALL** visible text with high accuracy (OCR).
+        *   Reconstruct any tables in a clean, readable format (like Markdown).
+        *   Extract key-value pairs (e.g., "Total: $59.99", "Invoice Number: 12345").
+        *   Summarize the document's purpose (e.g., "This is an invoice from 'Company A' for 'Product B'.").
+
+    *   **If the image is of a product:**
+        *   Identify the product name, brand, model number, and any specifications visible on the packaging or product itself.
+        *   Transcribe all text from the label or packaging.
+        *   Describe the product's appearance (color, shape, key features).
+
+3.  **Fallback to Descriptive Analysis:**
+    *   **If the image is a general photograph (e.g., a landscape, a person, an event):**
+        *   Provide a detailed description of the scene.
+        *   List all key objects, people, and animals.
+        *   Describe the setting, environment, and any notable activities.
+        *   Identify colors, shapes, and other significant visual attributes that would be useful for a search query.
+
+**Output Format:**
+- Use clear headings (e.g., "## Extracted Table", "## Key Information", "## Visual Description").
+- Be thorough and detailed. The goal is to make the visual information fully searchable through text.`;
     
     contents = {
         parts: [
@@ -68,20 +84,20 @@ Image Name: ${file.name}`;
         ],
     };
   } else {
-    // Text-based summarization for PDFs, Sheets, etc.
+    // Text-based summarization for PDFs, Sheets, Airtable records, etc.
     const MAX_CONTENT_LENGTH = 800000;
     const truncatedContent = file.content.substring(0, MAX_CONTENT_LENGTH);
-    const prompt = `You are an expert document analysis AI. I will provide you with a document. Your goal is to generate a structured summary for a search index.
+    const prompt = `You are an expert data analysis AI. I will provide you with content from a file or database record. Your goal is to generate a structured summary for a search index.
 
 Follow these instructions:
-1.  **Main Topic:** Briefly state the main purpose or topic of the document.
-2.  **Key Entities:** List important names, places, organizations, technical terms, etc.
+1.  **Main Topic:** Briefly state the main purpose or topic of the content.
+2.  **Key Entities:** List important names, places, organizations, product codes, technical terms, etc.
 3.  **Core Concepts:** Summarize the main ideas, arguments, or data points.
 4.  **Actionable Information:** Extract any specific instructions, contact details, dates, or important numbers.
 
 Base your summary *only* on the provided content.
 
-Document Name: ${file.name}
+Record/File Name: ${file.name}
 Content:
 ---
 ${truncatedContent}

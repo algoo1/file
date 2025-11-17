@@ -47,6 +47,9 @@ export const databaseService = {
             name,
             apiKey: `sk-${uuidv4().replace(/-/g, '')}`,
             googleDriveFolderUrl: null,
+            airtableApiKey: null,
+            airtableBaseId: null,
+            airtableTableId: null,
             syncedFiles: [],
             tags: [],
             syncInterval: 'MANUAL',
@@ -89,6 +92,7 @@ export const databaseService = {
             status: f.status,
             statusMessage: f.statusMessage,
             type: f.type,
+            source: f.source,
         }));
         return await databaseService.updateClient(clientId, { syncedFiles });
     }
