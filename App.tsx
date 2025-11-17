@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
@@ -15,11 +15,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-
-  const pollingIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -101,45 +97,6 @@ const App: React.FC = () => {
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
 
-  useEffect(() => {
-    if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-    }
-
-    const syncAndPoll = async () => {
-        if (!selectedClient || !selectedClient.googleDriveFolderUrl || !settings?.isGoogleDriveConnected) {
-            setIsSyncing(false);
-            return;
-        }
-
-        setIsSyncing(true);
-        setSyncError(null);
-        
-        try {
-            const result = await apiService.syncDataSource(selectedClient.id);
-            if (result.status === 'changed') {
-              setClients(prev => prev.map(c => c.id === selectedClient.id ? result.client : c));
-            }
-        } catch (error) {
-            console.error("Sync failed:", error);
-            setSyncError(error instanceof Error ? error.message : "An unknown error occurred during sync.");
-        } finally {
-            setIsSyncing(false);
-        }
-    };
-    
-    if (selectedClient && selectedClient.googleDriveFolderUrl) {
-        syncAndPoll(); // Initial sync check
-        pollingIntervalRef.current = window.setInterval(syncAndPoll, 30000); // Poll every 30 seconds
-    }
-
-    return () => {
-        if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-        }
-    };
-  }, [selectedClient, settings?.isGoogleDriveConnected]);
-
   const handleSearch = useCallback(async (query: string) => {
     if (!selectedClient) {
         return "No client selected.";
@@ -147,8 +104,19 @@ const App: React.FC = () => {
     if (!settings?.fileSearchServiceApiKey) {
         return "Error: File Search Service API Key is not configured in Settings.";
     }
-    // Directly call the file search service for the admin UI test search.
-    // This makes the dependency on the settings clear and avoids the public API simulation.
+
+    try {
+        // Sync data source on-demand before every search to ensure data is fresh.
+        const result = await apiService.syncDataSource(selectedClient.id);
+         if (result.status === 'changed') {
+            setClients(prev => prev.map(c => c.id === selectedClient.id ? result.client : c));
+        }
+    } catch (error) {
+        console.error("Sync failed during search operation:", error);
+        const errorMessage = error instanceof Error ? error.message : "Failed to sync latest data before searching.";
+        throw new Error(errorMessage);
+    }
+    
     return await fileSearchService.query(selectedClient, query, settings.fileSearchServiceApiKey);
   }, [selectedClient, settings]);
 
@@ -191,8 +159,6 @@ const App: React.FC = () => {
               onSetFolderUrl={handleSetFolderUrl}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
-              isSyncing={isSyncing}
-              syncError={syncError}
             />
           )}
         </aside>
@@ -214,7 +180,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.0.2</p>
+        <p>v1.0.3</p>
       </footer>
 
       {isAuthModalOpen && settings && (
