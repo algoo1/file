@@ -104,7 +104,6 @@ export const airtableService = {
       sessionStorage.removeItem('airtable_code_verifier');
 
       const params = new URLSearchParams({
-          client_id: clientId,
           redirect_uri: REDIRECT_URI,
           code: code,
           code_verifier: codeVerifier,
@@ -114,13 +113,18 @@ export const airtableService = {
       const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
       const response = await safeFetch(proxiedTokenUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+            // Airtable requires Basic auth for client credentials, even for public clients.
+            'Authorization': `Basic ${btoa(`${clientId}:`)}`
+          },
           body: params.toString(),
       });
       
       if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(`Airtable token exchange failed: ${errorData.error_description || response.statusText}`);
+          const errorMessage = errorData.error_description || errorData.error || response.statusText;
+          throw new Error(`Airtable token exchange failed: ${errorMessage}`);
       }
       
       const tokenData = await response.json();
@@ -139,7 +143,6 @@ export const airtableService = {
     }
     
     const params = new URLSearchParams({
-        client_id: settings.airtable_client_id,
         refresh_token: client.airtable_refresh_token,
         grant_type: 'refresh_token',
     });
@@ -149,6 +152,7 @@ export const airtableService = {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': `Basic ${btoa(`${settings.airtable_client_id}:`)}`
         },
         body: params.toString(),
     });
@@ -156,7 +160,8 @@ export const airtableService = {
     if (!response.ok) {
         const errorData = await response.json();
         console.error("Airtable token refresh failed:", errorData);
-        throw new Error(`Airtable token refresh failed: ${errorData.error_description || 'Please re-authenticate.'}`);
+        const errorMessage = errorData.error_description || errorData.error || 'Please re-authenticate.';
+        throw new Error(`Airtable token refresh failed: ${errorMessage}`);
     }
 
     const tokenData = await response.json();
