@@ -10,13 +10,14 @@ const ApiDetails: React.FC<ApiDetailsProps> = ({ client }) => {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
-  const endpoint = `/api/v1/search`; 
+  const endpoint = `${window.location.origin}/api/v1/search`; 
   
-  const curlCommand = `curl "https://your-backend-domain.com${endpoint}" \\
+  const curlCommand = `curl "${endpoint}" \\
   -H "x-api-key: ${client.apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "query": "Your question here"
+    "query": "Your question here",
+    "client_id": "${client.id}"
   }'`;
 
   const copyToClipboard = (text: string, type: 'key' | 'curl') => {
