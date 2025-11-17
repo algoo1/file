@@ -290,7 +290,7 @@ const FileManager: React.FC<FileManagerProps> = ({
       }
       
       // No records processed yet
-      if (isSyncing) {
+      if (isSyncing && (client.airtable_api_key || client.airtable_access_token)) {
           return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
       }
       
@@ -368,67 +368,76 @@ const FileManager: React.FC<FileManagerProps> = ({
             
             <div className="border-t border-gray-700 pt-4 mt-4">
                  <h3 className="text-md font-semibold text-gray-300 mb-2">Synced Data</h3>
-                 <div className="max-h-60 overflow-y-auto pr-1 space-y-4">
+                 <div className="max-h-60 overflow-y-auto pr-1 space-y-3">
                     
                     {/* Airtable Section */}
                     {client.airtable_base_id && client.airtable_table_id && (
-                        <div>
-                            <div className="bg-gray-700/50 p-2 rounded-md text-sm">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center min-w-0">
-                                        <AirtableIcon className="w-5 h-5 text-yellow-400 mr-3 flex-shrink-0" />
+                        <details className="bg-gray-900/50 rounded-lg border border-gray-700" open>
+                            <summary className="p-2 cursor-pointer font-semibold text-gray-300 flex items-center gap-2">
+                                <AirtableIcon className="w-5 h-5 text-yellow-400" />
+                                <span>Airtable Data</span>
+                            </summary>
+                            <div className="p-2 border-t border-gray-700">
+                                <div className="bg-gray-700/50 p-2 rounded-md text-sm">
+                                    <div className="flex items-center justify-between">
                                         <span className="truncate text-gray-300" title={client.airtable_table_id}>
                                             Table: {client.airtable_table_id}
                                         </span>
+                                        {(() => {
+                                            const { text, icon } = getAirtableAggregateStatus();
+                                            return (
+                                                <div className="flex items-center gap-2 text-gray-400" title={text}>
+                                                    <span>{text}</span>
+                                                    {icon}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
-                                    {(() => {
-                                        const { text, icon } = getAirtableAggregateStatus();
-                                        return (
-                                            <div className="flex items-center gap-2 text-gray-400" title={text}>
-                                                <span>{text}</span>
-                                                {icon}
-                                            </div>
-                                        );
-                                    })()}
                                 </div>
                             </div>
-                        </div>
+                        </details>
                     )}
                     
                     {/* Google Drive Section */}
                     {client.google_drive_folder_url && (
-                        <div>
-                            {(() => {
-                                const driveFiles = client.synced_files.filter(f => f.source === 'GOOGLE_DRIVE');
-                                
-                                if (isSyncing && driveFiles.length === 0) {
-                                    return <p className="text-gray-500 text-sm text-center py-2">Scanning Google Drive for files...</p>;
-                                }
-                                if (!isSyncing && driveFiles.length === 0) {
-                                    return <p className="text-gray-500 text-sm text-center py-2">No files synced from Google Drive yet.</p>;
-                                }
-                                if (driveFiles.length > 0) {
-                                    return (
-                                        <ul className="space-y-2">
-                                            {driveFiles.map(file => (
-                                                <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
-                                                    <div className="flex items-center min-w-0">
-                                                        <FileTypeIcon type={file.type} source={file.source} />
-                                                        <span className="truncate text-gray-300" title={file.name}>
-                                                            {file.name}
-                                                        </span>
-                                                    </div>
-                                                    <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
-                                                        <EyeIcon className="w-5 h-5" />
-                                                    </button>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    );
-                                }
-                                return null;
-                            })()}
-                        </div>
+                       <details className="bg-gray-900/50 rounded-lg border border-gray-700" open>
+                             <summary className="p-2 cursor-pointer font-semibold text-gray-300 flex items-center gap-2">
+                                <DriveIcon className="w-5 h-5 text-blue-400" />
+                                <span>Google Drive Files</span>
+                            </summary>
+                            <div className="p-2 border-t border-gray-700">
+                                {(() => {
+                                    const driveFiles = client.synced_files.filter(f => f.source === 'GOOGLE_DRIVE');
+                                    
+                                    if (isSyncing && driveFiles.length === 0) {
+                                        return <p className="text-gray-500 text-sm text-center py-2">Scanning Google Drive for files...</p>;
+                                    }
+                                    if (!isSyncing && driveFiles.length === 0) {
+                                        return <p className="text-gray-500 text-sm text-center py-2">No files synced from Google Drive yet.</p>;
+                                    }
+                                    if (driveFiles.length > 0) {
+                                        return (
+                                            <ul className="space-y-2">
+                                                {driveFiles.map(file => (
+                                                    <li key={file.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded-md text-sm">
+                                                        <div className="flex items-center min-w-0">
+                                                            <FileTypeIcon type={file.type} source={file.source} />
+                                                            <span className="truncate text-gray-300" title={file.name}>
+                                                                {file.name}
+                                                            </span>
+                                                        </div>
+                                                        <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
+                                                            <EyeIcon className="w-5 h-5" />
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+                           </div>
+                       </details>
                     )}
 
                     {/* General Empty State */}

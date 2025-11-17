@@ -5,6 +5,27 @@ const AIRTABLE_AUTH_URL = 'https://airtable.com/oauth2/v1/authorize';
 const AIRTABLE_TOKEN_URL = 'https://airtable.com/oauth2/v1/token';
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 
+
+/**
+ * A robust fetch wrapper that provides better error messages for common network failures.
+ * @param url The URL to fetch.
+ * @param options The fetch options.
+ * @returns A promise that resolves to the Response object.
+ */
+async function safeFetch(url: string, options?: RequestInit): Promise<Response> {
+    try {
+        return await fetch(url, options);
+    } catch (error) {
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+            throw new Error(
+                'Network request failed. This may be due to a browser extension (like an ad-blocker) or a network firewall. Please check your connection and extensions, then try again.'
+            );
+        }
+        throw error; // Re-throw other errors
+    }
+}
+
+
 const findPrimaryFieldName = (record: any): string => {
     const commonNames = ['Name', 'Title', 'ID', 'Primary', 'Key', 'Task'];
     if (record && record.fields) {
@@ -88,7 +109,7 @@ export const airtableService = {
           grant_type: 'authorization_code',
       });
       
-      const response = await fetch(AIRTABLE_TOKEN_URL, {
+      const response = await safeFetch(AIRTABLE_TOKEN_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: params.toString(),
@@ -136,7 +157,7 @@ export const airtableService = {
     const authToken = await airtableService.getAuthToken(client, airtableClientId);
     const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}`;
     try {
-      const response = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
+      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch records'} (Code: ${response.status})`);
@@ -153,7 +174,7 @@ export const airtableService = {
     const authToken = await airtableService.getAuthToken(client, airtableClientId);
     const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}/${recordId}`;
     try {
-      const response = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
+      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch record content'} (Code: ${response.status})`);
