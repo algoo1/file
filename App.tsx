@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSyncingClient, setIsSyncingClient] = useState<string | null>(null);
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
 
@@ -121,6 +122,27 @@ const App: React.FC = () => {
     const updatedClient = await apiService.updateClient(clientId, { syncInterval: interval });
     setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
   }, []);
+
+  const handleSyncNow = useCallback(async (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    if (!client?.googleDriveFolderUrl) {
+        alert("Please set a Google Drive folder URL before syncing.");
+        return;
+    }
+
+    setIsSyncingClient(clientId);
+    try {
+        const result = await apiService.syncDataSource(clientId);
+         if (result.status === 'changed') {
+            setClients(prevClients => prevClients.map(c => c.id === clientId ? result.client : c));
+        }
+    } catch (error) {
+        console.error("Manual sync failed:", error);
+        alert(`Failed to sync data source: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+        setIsSyncingClient(null);
+    }
+  }, [clients]);
   
   const handleAddTag = useCallback(async (clientId: string, tagName: string) => {
     const updatedClient = await apiService.addTagToClient(clientId, tagName);
@@ -195,6 +217,8 @@ const App: React.FC = () => {
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               onSetSyncInterval={handleSetSyncInterval}
+              onSyncNow={handleSyncNow}
+              isSyncing={isSyncingClient === selectedClient.id}
             />
           )}
         </aside>
@@ -216,7 +240,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.0.4</p>
+        <p>v1.0.5</p>
       </footer>
 
       {isAuthModalOpen && settings && (
