@@ -46,7 +46,11 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
     }
   }, [onSearch, query, selectedImage]);
   
-  const hasSearchableContent = query.trim() || selectedImage;
+  const hasContentToSearch = query.trim() || selectedImage;
+  const hasDataSource = client.googleDriveFolderUrl || 
+                        (client.airtableApiKey && client.airtableBaseId && client.airtableTableId) ||
+                        (client.airtableAccessToken && client.airtableBaseId && client.airtableTableId);
+  const canSearch = !isLoading && hasContentToSearch && hasDataSource;
 
   return (
     <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
@@ -55,7 +59,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
         <h2 className="text-xl font-semibold text-white">Test Search API</h2>
       </div>
       <p className="text-sm text-gray-400 mb-4">
-        Use this form to test the search functionality. You can ask a question, upload an image, or both to query the indexed data from the Google Drive files.
+        Use this form to test the search functionality. You can ask a question, upload an image, or both to query the indexed data from all connected data sources.
       </p>
 
       <form onSubmit={handleSearch}>
@@ -81,21 +85,21 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={`Ask a question about ${client.name}'s data...`}
+                placeholder={hasDataSource ? `Ask a question about ${client.name}'s data...` : "Please connect a data source first."}
                 className="flex-grow bg-gray-700 text-white rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-                disabled={isLoading || !client.googleDriveFolderUrl}
+                disabled={isLoading || !hasDataSource}
             />
             <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" id="image-upload" />
             <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
-                disabled={isLoading || !client.googleDriveFolderUrl}
+                disabled={isLoading || !hasDataSource}
             >
                 <ImageIcon className="w-5 h-5 mr-2" />
                 {selectedImage ? 'Change Image' : 'Add Image'}
             </button>
-             <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed min-w-[120px]" disabled={isLoading || !hasSearchableContent || !client.googleDriveFolderUrl}>
+             <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed min-w-[120px]" disabled={!canSearch}>
                 {isLoading ? (
                     <>
                         <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

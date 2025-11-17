@@ -1,19 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
+import { AirtableIcon } from './icons/AirtableIcon.tsx';
 import { CheckIcon } from './icons/CheckIcon.tsx';
 import { SystemSettings } from '../types.ts';
 
 interface SettingsProps {
   settings: SystemSettings | null;
   onSave: (settings: Partial<SystemSettings>) => Promise<any>;
-  onOpenAuthModal: () => void;
+  onOpenGoogleAuthModal: () => void;
+  onOpenAirtableAuthModal: () => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
   settings,
   onSave,
-  onOpenAuthModal,
+  onOpenGoogleAuthModal,
+  onOpenAirtableAuthModal,
 }) => {
   const [localApiKey, setLocalApiKey] = useState(settings?.fileSearchServiceApiKey || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -78,17 +81,30 @@ const Settings: React.FC<SettingsProps> = ({
 
         <div className="border-t border-gray-700 pt-4">
            <h3 className="text-md font-semibold text-gray-300 mb-2">Integrations</h3>
-            <button
-                onClick={onOpenAuthModal}
-                className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
-                    settings?.isGoogleDriveConnected 
-                    ? 'bg-green-600/80 text-white' 
-                    : 'bg-gray-700 hover:bg-gray-600 text-white'
-                }`}
-            >
-                <DriveIcon className="w-5 h-5" />
-                {settings?.isGoogleDriveConnected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
-            </button>
+            <div className="space-y-2">
+                <button
+                    onClick={onOpenGoogleAuthModal}
+                    className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
+                        settings?.isGoogleDriveConnected 
+                        ? 'bg-green-600/80 text-white' 
+                        : 'bg-gray-700 hover:bg-gray-600 text-white'
+                    }`}
+                >
+                    <DriveIcon className="w-5 h-5" />
+                    {settings?.isGoogleDriveConnected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
+                </button>
+                <button
+                    onClick={onOpenAirtableAuthModal}
+                    className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
+                        settings?.isAirtableConnected 
+                        ? 'bg-green-600/80 text-white' 
+                        : 'bg-gray-700 hover:bg-gray-600 text-white'
+                    }`}
+                >
+                    <AirtableIcon className="w-5 h-5" />
+                    {settings?.isAirtableConnected ? 'Airtable Integration Setup' : 'Setup Airtable Integration'}
+                </button>
+            </div>
         </div>
       </div>
     </div>

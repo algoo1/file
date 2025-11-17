@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Client, SyncedFile, Tag } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
 import { CheckIcon } from './icons/CheckIcon.tsx';
-import { RefreshIcon } from './icons/RefreshIcon.tsx';
 import { EyeIcon } from './icons/EyeIcon.tsx';
 import { ImageIcon } from './icons/ImageIcon.tsx';
 import { SheetIcon } from './icons/SheetIcon.tsx';
@@ -14,8 +13,10 @@ import { DriveIcon } from './icons/DriveIcon.tsx';
 interface FileManagerProps {
   client: Client;
   isGoogleDriveConnected: boolean;
+  isAirtableSetUp: boolean;
   onSetFolderUrl: (clientId: string, url: string) => Promise<void>;
-  onSetAirtableDetails: (clientId: string, details: { apiKey: string, baseId: string, tableId: string }) => Promise<void>;
+  onSetAirtableDetails: (clientId: string, details: Partial<Client>) => Promise<void>;
+  onInitiateAirtableOAuth: (clientId: string) => void;
   onAddTag: (clientId: string, tagName: string) => void;
   onRemoveTag: (clientId: string, tagId: string) => void;
   onSetSyncInterval: (clientId: string, interval: number | 'MANUAL') => void;
@@ -70,23 +71,18 @@ const GoogleDriveManager: React.FC<{
 }> = ({ client, isSyncing, isGoogleDriveConnected, onSetFolderUrl, onSyncNow }) => {
     const [folderUrl, setFolderUrl] = useState(client.googleDriveFolderUrl || '');
     const [isSaving, setIsSaving] = useState(false);
-    const [saveSuccess, setSaveSuccess] = useState(false);
 
     useEffect(() => {
         setFolderUrl(client.googleDriveFolderUrl || '');
-        setSaveSuccess(false);
     }, [client.googleDriveFolderUrl, client.id]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (isSaving || isSyncing) return;
         setIsSaving(true);
-        setSaveSuccess(false);
         try {
             const trimmedUrl = folderUrl.trim();
             await onSetFolderUrl(client.id, trimmedUrl);
-            setSaveSuccess(true);
-            setTimeout(() => setSaveSuccess(false), 2500);
             if (trimmedUrl) {
                 await onSyncNow(client.id);
             }
@@ -113,12 +109,10 @@ const GoogleDriveManager: React.FC<{
             />
             <button 
                 type="submit" 
-                className={`font-bold py-2 px-3 rounded-md transition-colors text-sm flex justify-center items-center w-24
-                    ${saveSuccess ? 'bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}
-                    disabled:bg-gray-600 disabled:cursor-not-allowed`}
+                className="font-bold py-2 px-3 rounded-md transition-colors text-sm flex justify-center items-center w-24 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-600 disabled:cursor-not-allowed"
                 disabled={isSaving || isSyncing || hasUnchangedUrl}
             >
-                {isSaving ? 'Saving...' : saveSuccess ? 'Saved!' : 'Save'}
+                {isSaving ? 'Saving...' : 'Save & Sync'}
             </button>
         </form>
     );
@@ -127,33 +121,38 @@ const GoogleDriveManager: React.FC<{
 const AirtableManager: React.FC<{
     client: Client;
     isSyncing: boolean;
-    onSetAirtableDetails: (clientId: string, details: { apiKey: string, baseId: string, tableId: string }) => Promise<void>;
+    isAirtableSetUp: boolean;
+    onSetAirtableDetails: (clientId: string, details: Partial<Client>) => Promise<void>;
+    onInitiateAirtableOAuth: (clientId: string) => void;
     onSyncNow: (clientId: string) => Promise<void>;
-}> = ({ client, isSyncing, onSetAirtableDetails, onSyncNow }) => {
+}> = ({ client, isSyncing, isAirtableSetUp, onSetAirtableDetails, onInitiateAirtableOAuth, onSyncNow }) => {
     const [apiKey, setApiKey] = useState(client.airtableApiKey || '');
     const [baseId, setBaseId] = useState(client.airtableBaseId || '');
     const [tableId, setTableId] = useState(client.airtableTableId || '');
     const [isSaving, setIsSaving] = useState(false);
-    const [saveSuccess, setSaveSuccess] = useState(false);
 
     useEffect(() => {
         setApiKey(client.airtableApiKey || '');
         setBaseId(client.airtableBaseId || '');
         setTableId(client.airtableTableId || '');
-        setSaveSuccess(false);
     }, [client.id, client.airtableApiKey, client.airtableBaseId, client.airtableTableId]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handlePatSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (isSaving || isSyncing) return;
         setIsSaving(true);
-        setSaveSuccess(false);
         try {
-            const details = { apiKey: apiKey.trim(), baseId: baseId.trim(), tableId: tableId.trim() };
+            const details = { 
+                airtableApiKey: apiKey.trim(), 
+                airtableBaseId: baseId.trim(), 
+                airtableTableId: tableId.trim(),
+                // Clear OAuth tokens if switching to PAT
+                airtableAccessToken: null,
+                airtableRefreshToken: null,
+                airtableTokenExpiresAt: null,
+            };
             await onSetAirtableDetails(client.id, details);
-            setSaveSuccess(true);
-            setTimeout(() => setSaveSuccess(false), 2500);
-             if (details.apiKey && details.baseId && details.tableId) {
+             if (details.airtableApiKey && details.airtableBaseId && details.airtableTableId) {
                 await onSyncNow(client.id);
             }
         } finally {
@@ -161,48 +160,81 @@ const AirtableManager: React.FC<{
         }
     };
     
-    const hasUnchangedDetails = apiKey.trim() === (client.airtableApiKey || '') 
+    if (!isAirtableSetUp) {
+        return <p className="text-gray-500 text-sm text-center py-4">Set up Airtable integration in Settings to enable this data source.</p>;
+    }
+
+    const hasPatUnchangedDetails = apiKey.trim() === (client.airtableApiKey || '') 
         && baseId.trim() === (client.airtableBaseId || '') 
         && tableId.trim() === (client.airtableTableId || '');
     
-    const canSave = !hasUnchangedDetails && apiKey && baseId && tableId;
+    const canSavePat = !hasPatUnchangedDetails && apiKey && baseId && tableId;
+    const isConnectedViaOAuth = !!client.airtableAccessToken;
+
+    const handleOAuthConnect = async () => {
+        // First, save any changes to base/table IDs
+        if (baseId.trim() !== (client.airtableBaseId || '') || tableId.trim() !== (client.airtableTableId || '')) {
+            await onSetAirtableDetails(client.id, { airtableBaseId: baseId.trim(), airtableTableId: tableId.trim() });
+        }
+        onInitiateAirtableOAuth(client.id);
+    };
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-3">
-             <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Airtable Personal Access Token"
-                className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-                disabled={isSyncing}
-            />
-             <input
-                type="text"
-                value={baseId}
-                onChange={(e) => setBaseId(e.target.value)}
-                placeholder="Airtable Base ID"
-                className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-                disabled={isSyncing}
-            />
-             <input
-                type="text"
-                value={tableId}
-                onChange={(e) => setTableId(e.target.value)}
-                placeholder="Airtable Table ID or Name"
-                className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
-                disabled={isSyncing}
-            />
-             <button 
-                type="submit" 
-                className={`w-full font-bold py-2 px-3 rounded-md transition-colors text-sm flex justify-center items-center
-                    ${saveSuccess ? 'bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}
+        <div className="space-y-3">
+            <button 
+                type="button"
+                onClick={handleOAuthConnect}
+                disabled={isSyncing || !baseId || !tableId}
+                className={`w-full font-bold py-2 px-3 rounded-md transition-colors text-sm flex justify-center items-center gap-2
+                    ${isConnectedViaOAuth ? 'bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}
                     disabled:bg-gray-600 disabled:cursor-not-allowed`}
-                disabled={isSaving || isSyncing || !canSave}
             >
-                {isSaving ? 'Saving...' : saveSuccess ? 'Saved & Synced!' : 'Save & Sync'}
+                <AirtableIcon className="w-5 h-5" />
+                {isConnectedViaOAuth ? 'Airtable Connected' : 'Connect with Airtable (OAuth)'}
             </button>
-        </form>
+            <div className="flex items-center gap-2">
+                <input
+                    type="text"
+                    value={baseId}
+                    onChange={(e) => setBaseId(e.target.value)}
+                    placeholder="Airtable Base ID"
+                    className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+                    disabled={isSyncing}
+                />
+                <input
+                    type="text"
+                    value={tableId}
+                    onChange={(e) => setTableId(e.target.value)}
+                    placeholder="Airtable Table ID or Name"
+                    className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+                    disabled={isSyncing}
+                />
+            </div>
+            <p className="text-xs text-gray-500 text-center">Enter Base and Table ID, then connect.</p>
+
+            <details className="pt-2">
+                <summary className="text-xs text-gray-500 hover:text-gray-300 cursor-pointer text-center">
+                    Connect using a Personal Access Token instead
+                </summary>
+                <form onSubmit={handlePatSubmit} className="space-y-3 mt-3">
+                    <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="Airtable Personal Access Token"
+                        className="w-full bg-gray-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+                        disabled={isSyncing}
+                    />
+                    <button 
+                        type="submit" 
+                        className="w-full font-bold py-2 px-3 rounded-md transition-colors text-sm flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-600 disabled:cursor-not-allowed"
+                        disabled={isSaving || isSyncing || !canSavePat}
+                    >
+                        {isSaving ? 'Saving...' : 'Save & Sync with Token'}
+                    </button>
+                </form>
+            </details>
+        </div>
     );
 };
 
@@ -210,8 +242,10 @@ const AirtableManager: React.FC<{
 const FileManager: React.FC<FileManagerProps> = ({ 
     client, 
     isGoogleDriveConnected, 
+    isAirtableSetUp,
     onSetFolderUrl, 
     onSetAirtableDetails,
+    onInitiateAirtableOAuth,
     onAddTag,
     onRemoveTag,
     onSetSyncInterval,
@@ -235,7 +269,9 @@ const FileManager: React.FC<FileManagerProps> = ({
     onSetSyncInterval(client.id, interval);
   };
   
-  const hasDataSource = client.googleDriveFolderUrl || (client.airtableApiKey && client.airtableBaseId && client.airtableTableId);
+  const hasDataSource = client.googleDriveFolderUrl || 
+                        (client.airtableApiKey && client.airtableBaseId && client.airtableTableId) ||
+                        (client.airtableAccessToken && client.airtableBaseId && client.airtableTableId);
 
   return (
     <>
@@ -258,7 +294,7 @@ const FileManager: React.FC<FileManagerProps> = ({
                 </div>
             </details>
             
-            <details className="bg-gray-900/50 rounded-lg border border-gray-700" open={!!client.airtableApiKey}>
+            <details className="bg-gray-900/50 rounded-lg border border-gray-700" open={!!client.airtableBaseId}>
                 <summary className="p-3 cursor-pointer font-semibold text-gray-200 flex items-center gap-2">
                     <AirtableIcon className="w-5 h-5 text-yellow-400" />
                     Airtable
@@ -266,8 +302,10 @@ const FileManager: React.FC<FileManagerProps> = ({
                 <div className="p-3 border-t border-gray-700">
                     <AirtableManager 
                         client={client} 
-                        isSyncing={isSyncing} 
-                        onSetAirtableDetails={onSetAirtableDetails} 
+                        isSyncing={isSyncing}
+                        isAirtableSetUp={isAirtableSetUp}
+                        onSetAirtableDetails={onSetAirtableDetails}
+                        onInitiateAirtableOAuth={onInitiateAirtableOAuth}
                         onSyncNow={onSyncNow} 
                     />
                 </div>

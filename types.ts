@@ -39,10 +39,16 @@ export interface Client {
   // Google Drive Data Source
   googleDriveFolderUrl: string | null;
 
-  // Airtable Data Source
+  // Airtable Data Source - supports two methods
+  // 1. Personal Access Token (PAT)
   airtableApiKey: string | null;
   airtableBaseId: string | null;
   airtableTableId: string | null;
+
+  // 2. OAuth 2.0
+  airtableAccessToken: string | null;
+  airtableRefreshToken: string | null;
+  airtableTokenExpiresAt: number | null; // Store as timestamp (Date.now() + expiresIn * 1000)
 }
 
 export interface SystemSettings {
@@ -51,4 +57,8 @@ export interface SystemSettings {
   googleClientId: string;
   googleClientSecret: string;
   isGoogleDriveConnected: boolean;
+  
+  // Airtable OAuth App Credentials
+  airtableClientId: string;
+  isAirtableConnected: boolean; // True if OAuth app creds are saved
 }

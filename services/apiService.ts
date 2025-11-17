@@ -57,7 +57,7 @@ export const apiService = {
     if (!settings.fileSearchServiceApiKey) throw new Error("File Search Service API Key is not set.");
 
     const isDriveConfigured = !!client.googleDriveFolderUrl && settings.isGoogleDriveConnected;
-    const isAirtableConfigured = !!client.airtableApiKey && !!client.airtableBaseId && !!client.airtableTableId;
+    const isAirtableConfigured = (!!client.airtableApiKey || !!client.airtableAccessToken) && !!client.airtableBaseId && !!client.airtableTableId;
 
     if (!isDriveConfigured && !isAirtableConfigured) {
       throw new Error("No data source is configured for this client.");
@@ -77,7 +77,7 @@ export const apiService = {
     }
 
     if (isAirtableConfigured) {
-        const airtableRecordsMeta = await airtableService.getRecords(client.airtableApiKey!, client.airtableBaseId!, client.airtableTableId!);
+        const airtableRecordsMeta = await airtableService.getRecords(client, settings.airtableClientId);
         allSourceFilesMeta.push(...airtableRecordsMeta.map(r => ({ ...r, type: 'record' as const, source: 'AIRTABLE' as const, mimeType: 'application/json' })));
     }
     
@@ -107,7 +107,7 @@ export const apiService = {
             if (fileMeta.source === 'GOOGLE_DRIVE') {
                 content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
             } else if (fileMeta.source === 'AIRTABLE') {
-                content = await airtableService.getRecordContent(client.airtableApiKey!, client.airtableBaseId!, client.airtableTableId!, fileMeta.id);
+                content = await airtableService.getRecordContent(client, settings.airtableClientId, fileMeta.id);
             }
 
             onProgress({ type: 'FILE_UPDATE', update: { id: fileMeta.id, status: 'INDEXING', statusMessage: 'Processing with AI...' }});

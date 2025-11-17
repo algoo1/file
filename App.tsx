@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings, SyncedFile } from './types.ts';
 import { apiService } from './services/apiService.ts';
+import { airtableService } from './services/airtableService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
 import ClientManager from './components/ClientManager.tsx';
 import FileManager from './components/FileManager.tsx';
@@ -8,6 +9,7 @@ import SearchInterface from './components/SearchInterface.tsx';
 import ApiDetails from './components/ApiDetails.tsx';
 import Settings from './components/Settings.tsx';
 import GoogleAuthModal from './components/GoogleAuthModal.tsx';
+import AirtableAuthModal from './components/AirtableAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
 
 const App: React.FC = () => {
@@ -15,10 +17,50 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState(false);
+  const [isAirtableAuthModalOpen, setIsAirtableAuthModalOpen] = useState(false);
   const [isSyncingClient, setIsSyncingClient] = useState<string | null>(null);
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
+
+  const handleUpdateClientState = (updatedClient: Client) => {
+    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+  };
+
+  // Effect to handle Airtable OAuth callback
+  useEffect(() => {
+    const handleAirtableRedirect = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      const state = params.get('state'); // Contains clientId
+      
+      if (code && state) {
+        console.log("Detected Airtable OAuth callback.");
+        const clientId = state;
+        const currentClient = clients.find(c => c.id === clientId);
+
+        // Clean the URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        if (currentClient && settings) {
+          try {
+            const tokenData = await airtableService.handleOAuthCallback(code, settings.airtableClientId);
+            const updatedClient = await apiService.updateClient(clientId, tokenData);
+            handleUpdateClientState(updatedClient);
+            setSelectedClientId(clientId); // Ensure the client is selected
+            alert("Airtable connected successfully!");
+          } catch (error) {
+            console.error("Airtable OAuth failed:", error);
+            alert(`Failed to connect Airtable: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+    };
+
+    if (clients.length > 0 && settings) {
+      handleAirtableRedirect();
+    }
+  }, [clients, settings]); // Run when clients and settings are loaded
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -41,10 +83,12 @@ const App: React.FC = () => {
 
   // Background sync effect
   useEffect(() => {
-    const hasDataSource = selectedClient?.googleDriveFolderUrl || (selectedClient?.airtableApiKey && selectedClient?.airtableBaseId && selectedClient?.airtableTableId);
+    const hasDataSource = selectedClient?.googleDriveFolderUrl || 
+                          (selectedClient?.airtableApiKey && selectedClient?.airtableBaseId && selectedClient?.airtableTableId) ||
+                          (selectedClient?.airtableAccessToken && selectedClient?.airtableBaseId && selectedClient?.airtableTableId);
 
     if (!selectedClient || selectedClient.syncInterval === 'MANUAL' || !hasDataSource) {
-      return; // Do nothing if no client, manual sync, or no data source
+      return;
     }
 
     const syncClientData = async () => {
@@ -53,7 +97,7 @@ const App: React.FC = () => {
       try {
         const result = await apiService.syncDataSource(selectedClient.id, () => {});
         if (result.status === 'changed') {
-          setClients(prevClients => prevClients.map(c => c.id === result.client.id ? result.client : c));
+          handleUpdateClientState(result.client);
           console.log(`Auto-sync successful for ${selectedClient.name}: files updated.`);
         } else {
           console.log(`Auto-sync successful for ${selectedClient.name}: no changes detected.`);
@@ -64,9 +108,8 @@ const App: React.FC = () => {
     };
 
     const intervalId = setInterval(syncClientData, selectedClient.syncInterval as number);
-
     return () => clearInterval(intervalId);
-  }, [selectedClient?.id, selectedClient?.syncInterval, selectedClient?.googleDriveFolderUrl, selectedClient?.airtableApiKey]);
+  }, [selectedClient]);
 
 
   const handleSaveSettings = useCallback(async (newSettings: Partial<SystemSettings>) => {
@@ -90,7 +133,7 @@ const App: React.FC = () => {
       await apiService.connectGoogleDrive(creds);
       const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: true });
       setSettings(finalSettings);
-      setIsAuthModalOpen(false);
+      setIsGoogleAuthModalOpen(false);
     } catch (error) {
       const finalSettings = await apiService.saveSettings({ isGoogleDriveConnected: false });
       setSettings(finalSettings);
@@ -99,6 +142,27 @@ const App: React.FC = () => {
       throw error;
     }
   }, [handleSaveSettings]);
+
+  const handleSaveAirtableSettings = useCallback(async (clientId: string) => {
+    try {
+      await handleSaveSettings({ airtableClientId: clientId });
+      const finalSettings = await apiService.saveSettings({ isAirtableConnected: true });
+      setSettings(finalSettings);
+      setIsAirtableAuthModalOpen(false);
+      alert("Airtable settings saved. You can now connect clients using OAuth.");
+    } catch(error) {
+      console.error("Failed to save Airtable settings:", error);
+      alert("Failed to save Airtable settings.");
+    }
+  }, [handleSaveSettings]);
+
+  const handleInitiateAirtableOAuth = useCallback((clientId: string) => {
+    if (settings?.airtableClientId) {
+      airtableService.initiateOAuth(settings.airtableClientId, clientId);
+    } else {
+      alert("Airtable integration has not been set up in Settings.");
+    }
+  }, [settings]);
 
   const handleAddClient = useCallback(async (name: string) => {
     if (name.trim()) {
@@ -114,29 +178,27 @@ const App: React.FC = () => {
   
   const handleSetFolderUrl = useCallback(async (clientId: string, url: string) => {
     const updatedClient = await apiService.updateClient(clientId, { googleDriveFolderUrl: url });
-    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+    handleUpdateClientState(updatedClient);
   }, []);
 
-   const handleSetAirtableDetails = useCallback(async (clientId: string, details: { apiKey: string, baseId: string, tableId: string }) => {
-    const updatedClient = await apiService.updateClient(clientId, { 
-        airtableApiKey: details.apiKey,
-        airtableBaseId: details.baseId,
-        airtableTableId: details.tableId,
-    });
-    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+   const handleSetAirtableDetails = useCallback(async (clientId: string, details: Partial<Client>) => {
+    const updatedClient = await apiService.updateClient(clientId, details);
+    handleUpdateClientState(updatedClient);
   }, []);
 
   const handleSetSyncInterval = useCallback(async (clientId: string, interval: number | 'MANUAL') => {
     const updatedClient = await apiService.updateClient(clientId, { syncInterval: interval });
-    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+    handleUpdateClientState(updatedClient);
   }, []);
 
   const handleSyncNow = useCallback(async (clientId: string) => {
     const client = clients.find(c => c.id === clientId);
-    const hasDataSource = client?.googleDriveFolderUrl || (client?.airtableApiKey && client?.airtableBaseId && client?.airtableTableId);
+     const hasDataSource = client?.googleDriveFolderUrl || 
+                          (client?.airtableApiKey && client?.airtableBaseId && client?.airtableTableId) ||
+                          (client?.airtableAccessToken && client?.airtableBaseId && client?.airtableTableId);
 
     if (!hasDataSource) {
-        alert("Please configure at least one data source (Google Drive or Airtable) before syncing.");
+        alert("Please configure at least one data source before syncing.");
         return;
     }
 
@@ -163,7 +225,7 @@ const App: React.FC = () => {
 
     try {
         const result = await apiService.syncDataSource(clientId, onProgress);
-        setClients(prevClients => prevClients.map(c => c.id === clientId ? result.client : c));
+        handleUpdateClientState(result.client);
     } catch (error) {
         console.error("Manual sync failed:", error);
         alert(`Failed to sync data source: ${error instanceof Error ? error.message : String(error)}`);
@@ -174,12 +236,12 @@ const App: React.FC = () => {
   
   const handleAddTag = useCallback(async (clientId: string, tagName: string) => {
     const updatedClient = await apiService.addTagToClient(clientId, tagName);
-    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+    handleUpdateClientState(updatedClient);
   }, []);
   
   const handleRemoveTag = useCallback(async (clientId: string, tagId: string) => {
     const updatedClient = await apiService.removeTagFromClient(clientId, tagId);
-    setClients(prev => prev.map(c => c.id === clientId ? updatedClient : c));
+    handleUpdateClientState(updatedClient);
   }, []);
 
   const handleSearch = useCallback(async (query: string, image?: { data: string; mimeType: string }) => {
@@ -212,7 +274,8 @@ const App: React.FC = () => {
           <Settings 
             settings={settings}
             onSave={handleSaveSettings}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onOpenGoogleAuthModal={() => setIsGoogleAuthModalOpen(true)}
+            onOpenAirtableAuthModal={() => setIsAirtableAuthModalOpen(true)}
           />
           <ClientManager 
             clients={clients} 
@@ -220,12 +283,14 @@ const App: React.FC = () => {
             onAddClient={handleAddClient} 
             onSelectClient={handleSelectClient} 
           />
-          {selectedClient && (
+          {selectedClient && settings && (
             <FileManager 
               client={selectedClient}
-              isGoogleDriveConnected={!!settings?.isGoogleDriveConnected}
+              isGoogleDriveConnected={!!settings.isGoogleDriveConnected}
+              isAirtableSetUp={!!settings.isAirtableConnected}
               onSetFolderUrl={handleSetFolderUrl}
               onSetAirtableDetails={handleSetAirtableDetails}
+              onInitiateAirtableOAuth={handleInitiateAirtableOAuth}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               onSetSyncInterval={handleSetSyncInterval}
@@ -255,12 +320,19 @@ const App: React.FC = () => {
         <p>v1.0.5</p>
       </footer>
 
-      {isAuthModalOpen && settings && (
+      {isGoogleAuthModalOpen && settings && (
         <GoogleAuthModal 
-            onClose={() => setIsAuthModalOpen(false)}
+            onClose={() => setIsGoogleAuthModalOpen(false)}
             initialSettings={settings}
             onConnect={handleConnectGoogleDrive}
             isConnected={!!settings.isGoogleDriveConnected}
+        />
+      )}
+      {isAirtableAuthModalOpen && settings && (
+        <AirtableAuthModal 
+            onClose={() => setIsAirtableAuthModalOpen(false)}
+            initialSettings={settings}
+            onSave={handleSaveAirtableSettings}
         />
       )}
     </div>

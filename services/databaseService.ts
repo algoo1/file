@@ -14,6 +14,8 @@ let settings: SystemSettings = {
     googleClientId: '',
     googleClientSecret: '', // Kept for backend compatibility but not used in frontend flow
     isGoogleDriveConnected: false,
+    airtableClientId: '',
+    isAirtableConnected: false,
 };
 
 let clients: Client[] = [];
@@ -47,9 +49,14 @@ export const databaseService = {
             name,
             apiKey: `sk-${uuidv4().replace(/-/g, '')}`,
             googleDriveFolderUrl: null,
+            // PAT fields
             airtableApiKey: null,
             airtableBaseId: null,
             airtableTableId: null,
+            // OAuth fields
+            airtableAccessToken: null,
+            airtableRefreshToken: null,
+            airtableTokenExpiresAt: null,
             syncedFiles: [],
             tags: [],
             syncInterval: 'MANUAL',
