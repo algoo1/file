@@ -43,21 +43,23 @@ const findPrimaryFieldName = (record: any): string => {
 };
 
 // PKCE Helper Functions
+const base64urlencode = (a: ArrayBuffer): string => {
+    return btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(a))))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
 const generateCodeVerifier = (): string => {
-    const array = new Uint32Array(28);
+    // RFC 7636: 43-128 chars, unreserved characters [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~"
+    // Generating 32 bytes of entropy and base64url encoding them results in a ~43 char string.
+    const array = new Uint8Array(32);
     window.crypto.getRandomValues(array);
-    return Array.from(array, dec => ('0' + dec.toString(16)).slice(-2)).join('');
+    return base64urlencode(array.buffer);
 };
 
 const sha256 = async (plain: string): Promise<ArrayBuffer> => {
     const encoder = new TextEncoder();
     const data = encoder.encode(plain);
     return window.crypto.subtle.digest('SHA-256', data);
-};
-
-const base64urlencode = (a: ArrayBuffer): string => {
-    return btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(a))))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
 const generateCodeChallenge = async (v: string): Promise<string> => {
@@ -79,7 +81,7 @@ export const airtableService = {
     const codeChallenge = await generateCodeChallenge(codeVerifier);
 
     const params = new URLSearchParams({
-        client_id: clientId,
+        client_id: clientId.trim(),
         redirect_uri: REDIRECT_URI,
         response_type: 'code',
         scope: 'data.records:read schema.bases:read', // Added schema read scope
@@ -105,8 +107,9 @@ export const airtableService = {
       sessionStorage.removeItem('airtable_code_verifier');
 
       // For public clients (SPA), client_id should be in the body.
+      const cleanClientId = clientId.trim();
       const params = new URLSearchParams({
-          client_id: clientId,
+          client_id: cleanClientId,
           redirect_uri: REDIRECT_URI,
           code: code,
           code_verifier: codeVerifier,
@@ -114,12 +117,11 @@ export const airtableService = {
       });
       
       const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
+      
+      // Let browser set Content-Type automatically for URLSearchParams
       const response = await safeFetch(proxiedTokenUrl, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: params.toString(),
+          body: params,
       });
       
       if (!response.ok) {
@@ -139,23 +141,23 @@ export const airtableService = {
   },
 
   refreshToken: async (client: Client, settings: SystemSettings): Promise<Partial<Client>> => {
-    if (!client.airtable_refresh_token || !settings.airtable_client_id) {
+    const cleanClientId = settings.airtable_client_id?.trim();
+    if (!client.airtable_refresh_token || !cleanClientId) {
         throw new Error("Missing credentials for token refresh.");
     }
     
     const params = new URLSearchParams({
-        client_id: settings.airtable_client_id,
+        client_id: cleanClientId,
         refresh_token: client.airtable_refresh_token,
         grant_type: 'refresh_token',
     });
     
     const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
+    
+    // Let browser set Content-Type automatically for URLSearchParams
     const response = await safeFetch(proxiedTokenUrl, {
         method: 'POST',
-        headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString(),
+        body: params,
     });
 
     if (!response.ok) {
