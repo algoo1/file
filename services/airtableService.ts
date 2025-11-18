@@ -1,3 +1,4 @@
+
 // This service handles all interactions with the Airtable API.
 import { Client, SystemSettings } from '../types.ts';
 
@@ -103,7 +104,9 @@ export const airtableService = {
       }
       sessionStorage.removeItem('airtable_code_verifier');
 
+      // For public clients (SPA), client_id should be in the body.
       const params = new URLSearchParams({
+          client_id: clientId,
           redirect_uri: REDIRECT_URI,
           code: code,
           code_verifier: codeVerifier,
@@ -115,8 +118,6 @@ export const airtableService = {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/x-www-form-urlencoded',
-            // Airtable requires Basic auth for client credentials, even for public clients.
-            'Authorization': `Basic ${btoa(`${clientId}:`)}`
           },
           body: params.toString(),
       });
@@ -143,6 +144,7 @@ export const airtableService = {
     }
     
     const params = new URLSearchParams({
+        client_id: settings.airtable_client_id,
         refresh_token: client.airtable_refresh_token,
         grant_type: 'refresh_token',
     });
@@ -152,7 +154,6 @@ export const airtableService = {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': `Basic ${btoa(`${settings.airtable_client_id}:`)}`
         },
         body: params.toString(),
     });

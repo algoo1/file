@@ -70,7 +70,7 @@ const Settings: React.FC<SettingsProps> = ({
             />
             <button
               onClick={handleSave}
-              disabled={isSaving || !localApiKey.trim() || !hasUnsavedChanges}
+              disabled={isSaving || !localApiKey.trim()}
               className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm disabled:bg-gray-600 disabled:cursor-not-allowed"
             >
               {isSaving ? 'Saving...' : 'Save'}

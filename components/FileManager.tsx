@@ -107,8 +107,6 @@ const GoogleDriveManager: React.FC<{
         return <p className="text-gray-500 text-sm text-center py-4">Connect to Google Drive in Settings to enable this data source.</p>;
     }
 
-    const hasUnchangedUrl = folderUrl.trim() === (client.google_drive_folder_url || '');
-
     return (
         <form onSubmit={handleSubmit} className="flex gap-2">
             <input
@@ -122,7 +120,7 @@ const GoogleDriveManager: React.FC<{
             <button 
                 type="submit" 
                 className="font-bold py-2 px-3 rounded-md transition-colors text-sm flex justify-center items-center w-24 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-600 disabled:cursor-not-allowed"
-                disabled={isSaving || isSyncing || hasUnchangedUrl}
+                disabled={isSaving || isSyncing}
             >
                 {isSaving ? 'Saving...' : 'Save & Sync'}
             </button>
@@ -176,11 +174,7 @@ const AirtableManager: React.FC<{
         return <p className="text-gray-500 text-sm text-center py-4">Set up Airtable integration in Settings to enable this data source.</p>;
     }
 
-    const hasPatUnchangedDetails = apiKey.trim() === (client.airtable_api_key || '') 
-        && baseId.trim() === (client.airtable_base_id || '') 
-        && tableId.trim() === (client.airtable_table_id || '');
-    
-    const canSavePat = !hasPatUnchangedDetails && apiKey && baseId && tableId;
+    const canSavePat = apiKey && baseId && tableId;
     const isConnectedViaOAuth = !!client.airtable_access_token;
 
     const handleOAuthConnect = async () => {
