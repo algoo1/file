@@ -49,9 +49,9 @@ const base64urlencode = (a: ArrayBuffer): string => {
 };
 
 const generateCodeVerifier = (): string => {
-    // RFC 7636: 43-128 chars, unreserved characters [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~"
-    // Generating 32 bytes of entropy and base64url encoding them results in a ~43 char string.
-    const array = new Uint8Array(32);
+    // RFC 7636: 43-128 chars. 
+    // 96 bytes of entropy -> base64url encoded -> ~128 chars.
+    const array = new Uint8Array(96);
     window.crypto.getRandomValues(array);
     return base64urlencode(array.buffer);
 };
@@ -84,7 +84,7 @@ export const airtableService = {
         client_id: clientId.trim(),
         redirect_uri: REDIRECT_URI,
         response_type: 'code',
-        scope: 'data.records:read schema.bases:read', // Added schema read scope
+        scope: 'data.records:read schema.bases:read', 
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
         state: clientState,
@@ -106,8 +106,8 @@ export const airtableService = {
       }
       sessionStorage.removeItem('airtable_code_verifier');
 
-      // For public clients (SPA), client_id should be in the body.
       const cleanClientId = clientId.trim();
+      
       const params = new URLSearchParams({
           client_id: cleanClientId,
           redirect_uri: REDIRECT_URI,
@@ -118,10 +118,12 @@ export const airtableService = {
       
       const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
       
-      // Let browser set Content-Type automatically for URLSearchParams
       const response = await safeFetch(proxiedTokenUrl, {
           method: 'POST',
-          body: params,
+          headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: params.toString(),
       });
       
       if (!response.ok) {
@@ -135,7 +137,6 @@ export const airtableService = {
           airtable_access_token: tokenData.access_token,
           airtable_refresh_token: tokenData.refresh_token,
           airtable_token_expires_at: new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString(),
-          // Clear PAT on successful OAuth
           airtable_api_key: null,
       };
   },
@@ -154,10 +155,12 @@ export const airtableService = {
     
     const proxiedTokenUrl = `${CORS_PROXY_URL}${encodeURIComponent(AIRTABLE_TOKEN_URL)}`;
     
-    // Let browser set Content-Type automatically for URLSearchParams
     const response = await safeFetch(proxiedTokenUrl, {
         method: 'POST',
-        body: params,
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params.toString(),
     });
 
     if (!response.ok) {

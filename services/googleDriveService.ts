@@ -46,6 +46,48 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     });
 };
 
+/**
+ * Internal helper to ensure we have a valid access token.
+ * If missing, it attempts to request one using the tokenClient.
+ */
+const ensureAccessToken = async (): Promise<void> => {
+    const gapi = window.gapi as any;
+    if (!gapiClientInitialized) {
+        throw new Error("GAPI client not initialized.");
+    }
+
+    // If we already have a token, we are good.
+    if (gapi.client.getToken()) {
+        return;
+    }
+
+    console.log("Google access token missing. Attempting to refresh...");
+
+    if (!tokenClient) {
+        throw new Error("Google Token Client not initialized. Please refresh the page.");
+    }
+
+    return new Promise((resolve, reject) => {
+        try {
+            // Temporarily override the callback to handle this specific request
+            tokenClient.callback = (resp: any) => {
+                if (resp.error) {
+                    reject(resp);
+                } else {
+                    console.log("Google access token refreshed successfully.");
+                    resolve();
+                }
+            };
+            
+            // Request token. prompt: '' tries to do it silently if possible, 
+            // or shows selector if multiple accounts.
+            tokenClient.requestAccessToken({ prompt: '' });
+        } catch (err) {
+            reject(err);
+        }
+    });
+};
+
 
 export const googleDriveService = {
   /**
@@ -169,10 +211,12 @@ export const googleDriveService = {
    */
   getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string; modifiedTime: string }[]> => {
     const gapi = window.gapi as any;
-    if (!gapiClientInitialized || !gapi?.client?.drive) {
-        throw new Error("GAPI client not initialized. Please connect to Google Drive.");
-    }
-     if (!gapi.client.getToken()) {
+    
+    // Try to restore token if missing
+    await ensureAccessToken();
+
+    if (!gapi.client.getToken()) {
+         // Should be caught by ensureAccessToken, but double check
         throw new Error("Google session expired or user is not signed in. Please reconnect to Google Drive.");
     }
 
@@ -202,6 +246,10 @@ export const googleDriveService = {
    */
   getFileContent: async (fileId: string, mimeType: string): Promise<string> => {
     const gapi = window.gapi as any;
+    
+    // Try to restore token if missing
+    await ensureAccessToken();
+    
     const token = gapi?.client?.getToken();
     if (!token?.access_token) {
         throw new Error("User not authenticated or token has expired. Please reconnect to Google Drive.");
