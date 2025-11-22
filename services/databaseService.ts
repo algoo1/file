@@ -117,37 +117,23 @@ export const databaseService = {
     },
     
     // File Management (within a client)
-    updateClientFiles: async (clientId: string, files: FileObject[]): Promise<SyncedFile[]> => {
-        // First, delete all existing files for this client to ensure a clean slate.
-        const { error: deleteError } = await supabase
-            .from('synced_files')
-            .delete()
-            .eq('client_id', clientId);
-        
-        if (deleteError) throw deleteError;
-
+    updateClientFiles: async (clientId: string, files: Partial<SyncedFile>[]): Promise<SyncedFile[]> => {
         if (files.length === 0) return [];
 
-        // Now, insert the new batch of files.
-        const filesToInsert = files.map(f => ({
+        // Use Upsert to update existing files or insert new ones.
+        // We map the data to ensure client_id and updated_at are set.
+        const updates = files.map(f => ({
+            ...f,
             client_id: clientId,
-            source_item_id: f.id,
-            name: f.name,
-            status: f.status,
-            status_message: f.statusMessage,
-            type: f.type,
-            source: f.source,
-            summary: f.summary,
-            last_synced_at: new Date().toISOString(),
-            source_modified_at: f.source_modified_at,
+            updated_at: new Date().toISOString()
         }));
         
-        const { data, error: insertError } = await supabase
+        const { data, error } = await supabase
             .from('synced_files')
-            .insert(filesToInsert)
+            .upsert(updates)
             .select();
         
-        if (insertError) throw insertError;
+        if (error) throw error;
         return data;
     }
 };

@@ -1,4 +1,4 @@
-import { FileObject, Client } from '../types.ts';
+import { FileObject, Client, SyncedFile } from '../types.ts';
 import { summarizeSingleContent } from './geminiService.ts';
 import MiniSearch from 'minisearch';
 
@@ -64,6 +64,21 @@ export const fileSearchService = {
     }
     await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async
   },
+
+  /**
+   * Restores a file to the search index using existing data from the database.
+   * Does NOT call the AI service. This is used for "Smart Sync" when a file hasn't changed.
+   */
+  restoreIndex: async (clientId: string, file: SyncedFile): Promise<void> => {
+      if (file.status === 'COMPLETED' && file.summary) {
+          addOrUpdateFileInIndex(clientId, {
+              id: file.source_item_id,
+              name: file.name,
+              summary: file.summary,
+              source: file.source
+          });
+      }
+  },
   
   /**
    * Processes a single file, summarizes it, and adds it to the local search index.
@@ -115,6 +130,8 @@ export const fileSearchService = {
         
         const localIndex = getClientIndex(client.id);
         if (localIndex.documentCount === 0) {
+            // Try to warn, but allow image-only search if possible? 
+            // Actually if no docs, RAG is useless.
             return "There is no data indexed for this client. Please sync a data source first.";
         }
 
@@ -127,8 +144,6 @@ export const fileSearchService = {
             });
         } else {
             // If it's an image-only query, we take all documents for context.
-            // FIX: MiniSearch does not have a public API to get all documents.
-            // Accessing the internal `_documents` map is a workaround.
             searchResults = Array.from((localIndex as any)._documents.values());
         }
         

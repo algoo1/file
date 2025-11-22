@@ -10,6 +10,7 @@ import { DriveIcon } from './icons/DriveIcon.tsx';
 import { CheckCircleIcon } from './icons/CheckCircleIcon.tsx';
 import { XCircleIcon } from './icons/XCircleIcon.tsx';
 import { ClockIcon } from './icons/ClockIcon.tsx';
+import { RefreshIcon } from './icons/RefreshIcon.tsx';
 
 interface FileManagerProps {
   client: Client;
@@ -22,6 +23,7 @@ interface FileManagerProps {
   onRemoveTag: (clientId: string, tagId: string) => void;
   onSetSyncInterval: (clientId: string, interval: number | 'MANUAL') => void;
   onSyncNow: (clientId: string) => Promise<void>;
+  onSyncFile?: (clientId: string, file: SyncedFile) => Promise<void>;
   isSyncing: boolean;
 }
 
@@ -256,10 +258,12 @@ const FileManager: React.FC<FileManagerProps> = ({
     onRemoveTag,
     onSetSyncInterval,
     onSyncNow,
+    onSyncFile,
     isSyncing,
 }) => {
   const [newTagName, setNewTagName] = useState('');
   const [viewingFile, setViewingFile] = useState<SyncedFile | null>(null);
+  const [syncingFileId, setSyncingFileId] = useState<string | null>(null);
 
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,6 +277,14 @@ const FileManager: React.FC<FileManagerProps> = ({
     const value = e.target.value;
     const interval = value === 'MANUAL' ? 'MANUAL' : parseInt(value, 10);
     onSetSyncInterval(client.id, interval);
+  };
+
+  const handleSingleFileSync = async (file: SyncedFile) => {
+      if (onSyncFile) {
+          setSyncingFileId(file.id);
+          await onSyncFile(client.id, file);
+          setSyncingFileId(null);
+      }
   };
   
   const hasDataSource = client.google_drive_folder_url || 
@@ -391,7 +403,7 @@ const FileManager: React.FC<FileManagerProps> = ({
                                 <span>Airtable Data</span>
                             </summary>
                             <div className="p-2 border-t border-gray-700">
-                                <div className="bg-gray-700/50 p-2 rounded-md text-sm">
+                                <div className="bg-gray-700/50 p-2 rounded-md text-sm mb-2">
                                     <div className="flex items-center justify-between">
                                         <span className="truncate text-gray-300" title={client.airtable_table_id}>
                                             Table: {client.airtable_table_id}
@@ -407,6 +419,36 @@ const FileManager: React.FC<FileManagerProps> = ({
                                         })()}
                                     </div>
                                 </div>
+                                {/* Individual Airtable Records List */}
+                                {(() => {
+                                    const airtableRecords = client.synced_files.filter(f => f.source === 'AIRTABLE');
+                                    if (airtableRecords.length > 0) {
+                                        return (
+                                            <ul className="space-y-2 pl-2 border-l-2 border-gray-700 mt-2">
+                                                {airtableRecords.map(file => (
+                                                     <li key={file.id} className="flex items-center justify-between bg-gray-800/50 p-1.5 rounded-md text-xs">
+                                                        <span className="truncate text-gray-400 max-w-[60%]" title={file.name}>
+                                                            {file.name}
+                                                        </span>
+                                                        <div className="flex items-center gap-1">
+                                                             <button 
+                                                                onClick={() => handleSingleFileSync(file)}
+                                                                className={`p-1 rounded hover:bg-gray-600 text-gray-400 hover:text-blue-400 transition-colors ${syncingFileId === file.id ? 'animate-spin text-blue-400' : ''}`} 
+                                                                title="Sync this record"
+                                                                disabled={isSyncing}
+                                                            >
+                                                                <RefreshIcon className="w-3 h-3" />
+                                                            </button>
+                                                            <div className={statusIndicatorClasses(file.status)}>
+                                                                <CheckCircleIcon className="w-3 h-3" />
+                                                            </div>
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )
+                                    }
+                                })()}
                             </div>
                         </details>
                     )}
@@ -439,9 +481,19 @@ const FileManager: React.FC<FileManagerProps> = ({
                                                                 {file.name}
                                                             </span>
                                                         </div>
-                                                        <button onClick={() => setViewingFile(file)} className={`ml-2 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
-                                                            <EyeIcon className="w-5 h-5" />
-                                                        </button>
+                                                        <div className="flex items-center gap-1">
+                                                            <button 
+                                                                onClick={() => handleSingleFileSync(file)}
+                                                                className={`p-1.5 rounded-full hover:bg-gray-600 text-gray-400 hover:text-blue-400 transition-colors ${syncingFileId === file.id ? 'animate-spin text-blue-400' : ''}`} 
+                                                                title="Sync this file only"
+                                                                disabled={isSyncing}
+                                                            >
+                                                                <RefreshIcon className="w-4 h-4" />
+                                                            </button>
+                                                            <button onClick={() => setViewingFile(file)} className={`ml-1 p-1 rounded-full hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`} title="View Status Details">
+                                                                <EyeIcon className="w-5 h-5" />
+                                                            </button>
+                                                        </div>
                                                     </li>
                                                 ))}
                                             </ul>

@@ -205,6 +205,16 @@ const App: React.FC = () => {
     handleUpdateClientState(updatedClient);
   }, []);
 
+  const handleSyncFile = useCallback(async (clientId: string, file: SyncedFile) => {
+    try {
+      const result = await apiService.syncSingleFile(clientId, file);
+      handleUpdateClientState(result.client);
+    } catch (error) {
+      console.error("Single file sync failed:", error);
+      alert(`Failed to sync file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, []);
+
   const handleSyncNow = useCallback(async (clientId: string) => {
     const client = clients.find(c => c.id === clientId);
      const hasDataSource = client?.google_drive_folder_url || 
@@ -227,15 +237,22 @@ const App: React.FC = () => {
               if (c.id === clientId) {
                   let updatedFiles: SyncedFile[];
                   if (event.type === 'INITIAL_LIST') {
-                      // Map partial file data to full SyncedFile structure, providing defaults.
-                      updatedFiles = event.files.map(f => ({
-                          ...f,
-                          id: f.id || crypto.randomUUID(),
-                          client_id: clientId,
-                          status: f.status || 'IDLE',
-                          created_at: new Date().toISOString(),
-                          updated_at: new Date().toISOString(),
-                      } as SyncedFile));
+                      // For partial updates, we need to merge with existing files, not replace blindly if they aren't in the initial list
+                      // However, syncDataSource provides the FULL list of current source items in 'INITIAL_LIST'.
+                      // We map partial file data to full SyncedFile structure, using existing data where possible.
+                      
+                      updatedFiles = event.files.map(f => {
+                          const existing = c.synced_files.find(ef => ef.source_item_id === f.source_item_id);
+                          return {
+                            ...(existing || {}),
+                            ...f,
+                            id: f.id || existing?.id || crypto.randomUUID(),
+                            client_id: clientId,
+                            status: f.status || 'IDLE',
+                            created_at: existing?.created_at || new Date().toISOString(),
+                            updated_at: new Date().toISOString(),
+                          } as SyncedFile;
+                      });
                   } else { // 'FILE_UPDATE'
                       // Find and update the specific file in the client's list.
                       updatedFiles = c.synced_files.map(f =>
@@ -263,7 +280,7 @@ const App: React.FC = () => {
                 if (c.id === clientId) {
                     // Mark all non-completed files as failed.
                     const updatedFiles = c.synced_files.map(f => {
-                        if (f.status !== 'COMPLETED') {
+                        if (f.status === 'SYNCING' || f.status === 'INDEXING') {
                              return { ...f, status: 'FAILED' as const, status_message: `Sync failed: ${errorMessage}` };
                         }
                         return f;
@@ -355,6 +372,7 @@ const App: React.FC = () => {
               onRemoveTag={handleRemoveTag}
               onSetSyncInterval={handleSetSyncInterval}
               onSyncNow={handleSyncNow}
+              onSyncFile={handleSyncFile}
               isSyncing={isSyncingClient === selectedClient.id}
             />
           )}
