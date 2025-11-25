@@ -245,7 +245,11 @@ export const airtableService = {
             // Cache busting
             params.append('_t', Date.now().toString());
             
-            const response = await safeFetch(`${baseUrl}?${params.toString()}`, { 
+            const targetUrl = `${baseUrl}?${params.toString()}`;
+            // Proxy the data request to avoid CORS
+            const proxiedUrl = `${CORS_PROXY_URL}${encodeURIComponent(targetUrl)}`;
+            
+            const response = await safeFetch(proxiedUrl, { 
                 headers: { 'Authorization': `Bearer ${accessToken}` } 
             });
 
@@ -276,8 +280,12 @@ export const airtableService = {
   getRecordContent: async (client: Client, settings: SystemSettings, recordId: string): Promise<string> => {
     const { accessToken } = await airtableService.getAuthToken(client, settings);
     const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}/${recordId}?_t=${Date.now()}`;
+    
+    // Proxy the data request to avoid CORS
+    const proxiedUrl = `${CORS_PROXY_URL}${encodeURIComponent(url)}`;
+    
     try {
-      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+      const response = await safeFetch(proxiedUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
       if (!response.ok) {
         // Pass through status code for 404 detection
         const errorData = await response.json();
