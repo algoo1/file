@@ -40,37 +40,30 @@ export async function summarizeSingleContent(
   let contents: any;
 
   if (file.type === 'image') {
-    // Advanced multimodal prompt for structured data extraction and description
-    const prompt = `You are an advanced AI assistant specializing in multimodal data extraction and analysis. Your task is to process the provided image and generate a structured, text-based representation of its content for a search index. Your output should be optimized for keyword-based and semantic search.
+    // Advanced multimodal prompt for structured data extraction and description with multilingual support
+    const prompt = `You are an advanced AI assistant specializing in multimodal data extraction and analysis for a global search index. Your task is to process the provided image and generate a structured, text-based representation of its content.
 
 **Image Name:** ${file.name}
 
 **Instructions:**
 
-1.  **Analyze Image Type:** First, determine the type of image. Is it a document, a spreadsheet, a receipt, a product label, a diagram, or a photograph?
+1.  **Analyze Image Type:** Determine if it is a document, spreadsheet, receipt, label, diagram, or photograph.
 
-2.  **Prioritize Structured Data Extraction:**
-    *   **If the image contains text, tables, or lists (like a screenshot of a spreadsheet, an invoice, or a price list):**
-        *   Transcribe **ALL** visible text with high accuracy (OCR).
-        *   Reconstruct any tables in a clean, readable format (like Markdown).
-        *   Extract key-value pairs (e.g., "Total: $59.99", "Invoice Number: 12345").
-        *   Summarize the document's purpose (e.g., "This is an invoice from 'Company A' for 'Product B'.").
+2.  **Structured Data Extraction:**
+    *   Transcribe visible text with high accuracy (OCR).
+    *   Reconstruct tables in Markdown.
+    *   Extract key-value pairs (e.g., Invoice #, Dates, Totals).
 
-    *   **If the image is of a product:**
-        *   Identify the product name, brand, model number, and any specifications visible on the packaging or product itself.
-        *   Transcribe all text from the label or packaging.
-        *   Describe the product's appearance (color, shape, key features).
+3.  **Visual Description:** Describe the scene, objects, colors, and key visual features.
 
-3.  **Fallback to Descriptive Analysis:**
-    *   **If the image is a general photograph (e.g., a landscape, a person, an event):**
-        *   Provide a detailed description of the scene.
-        *   List all key objects, people, and animals.
-        *   Describe the setting, environment, and any notable activities.
-        *   Identify colors, shapes, and other significant visual attributes that would be useful for a search query.
+4.  **Multilingual Search Keywords (CRITICAL):** 
+    *   Identify the top 20 most important keywords, entities, and concepts from the image.
+    *   **Translate** these keywords into the following languages: **Arabic, English, French, German, Spanish, Portuguese, Chinese (Simplified), Japanese, Russian, and Hindi**.
+    *   List them clearly as a comma-separated list or a keyword block at the end of the summary. This allows users to search for this image using any of these languages.
 
 **Output Format:**
-- Use clear headings (e.g., "## Extracted Table", "## Key Information", "## Visual Description").
-- Be thorough and detailed. The goal is to make the visual information fully searchable through text.`;
+- Use clear headings (e.g., "## Extracted Text", "## Visual Description", "## Multilingual Keywords").
+`;
     
     contents = {
         parts: [
@@ -87,13 +80,17 @@ export async function summarizeSingleContent(
     // Text-based summarization for PDFs, Sheets, Airtable records, etc.
     const MAX_CONTENT_LENGTH = 800000;
     const truncatedContent = file.content.substring(0, MAX_CONTENT_LENGTH);
-    const prompt = `You are an expert data analysis AI. I will provide you with content from a file or database record. Your goal is to generate a structured summary for a search index.
+    const prompt = `You are an expert data analysis AI. I will provide you with content from a file or database record. Your goal is to generate a structured summary for a **multilingual** search index.
 
 Follow these instructions:
-1.  **Main Topic:** Briefly state the main purpose or topic of the content.
+1.  **Main Topic:** Briefly state the main purpose or topic of the content (in the content's original language).
 2.  **Key Entities:** List important names, places, organizations, product codes, technical terms, etc.
 3.  **Core Concepts:** Summarize the main ideas, arguments, or data points.
 4.  **Actionable Information:** Extract any specific instructions, contact details, dates, or important numbers.
+5.  **Multilingual Keywords (CRITICAL):** 
+    *   Identify the top 20 most important keywords, concepts, or entities from the content.
+    *   **Translate** these specific keywords into the following languages: **Arabic, English, French, German, Spanish, Portuguese, Chinese (Simplified), Japanese, Russian, and Hindi**.
+    *   Format them as a simple list or block of text. This section is strictly for the search engine to index, so ensure the translated terms are accurate.
 
 Base your summary *only* on the provided content.
 

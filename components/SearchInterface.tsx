@@ -78,6 +78,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
       </div>
       <p className="text-sm text-gray-400 mb-4">
         Use this form to test the search functionality. You can ask a question, upload an image, or both to query the indexed data from all connected data sources.
+        Supports Arabic, English, French, and other major languages.
       </p>
 
       <form onSubmit={handleSearch}>
@@ -108,9 +109,10 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
         <div className="flex flex-col sm:flex-row gap-2">
              <input
                 type="text"
+                dir="auto"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={hasDataSource ? `Ask a question about ${client.name}'s data...` : "Please connect a data source first."}
+                placeholder={hasDataSource ? `Ask a question (Arabic, English, French, etc.)` : "Please connect a data source first."}
                 className="flex-grow bg-gray-700 text-white rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
                 disabled={isLoading || !hasDataSource}
             />
@@ -142,7 +144,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
         <div className="bg-gray-900/50 p-4 rounded-md mt-4 border border-gray-700">
             {isLoading && <p className="text-gray-400">Searching...</p>}
             {result && (
-                <div className="text-gray-300 whitespace-pre-wrap prose prose-invert prose-sm max-w-none">
+                <div className="text-gray-300 whitespace-pre-wrap prose prose-invert prose-sm max-w-none" dir="auto">
                     <p>{result}</p>
                 </div>
             )}

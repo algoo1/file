@@ -18,6 +18,8 @@ const getClientIndex = (clientId: string) => {
             searchOptions: {
                 prefix: true, // support "prefix search" (e.g., "star" matches "starry")
                 fuzzy: 0.2,   // allow for some typos
+                // Boost summary slightly as it contains the multilingual keywords
+                boost: { summary: 2 } 
             }
         });
     }
@@ -136,6 +138,7 @@ export const fileSearchService = {
         }
 
         // STEP 1: Fast local search to pre-filter relevant documents.
+        // We do this to avoid sending 50 files to Gemini (context window cost/latency).
         let searchResults;
         if (query.trim()) {
             searchResults = localIndex.search(query, {
@@ -164,13 +167,14 @@ export const fileSearchService = {
             .join('\n\n---\n\n');
         
         // STEP 2: Call the AI with a much smaller, more relevant context.
-        const promptText = `You are an intelligent search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context from a pre-filtered list of relevant files and the user-provided image if available.
+        const promptText = `You are an intelligent multilingual search assistant. Your task is to provide a helpful and accurate answer to the user's query based *exclusively* on the provided context.
 
-- Analyze the user's query and image (if provided) to understand their intent.
-- Scrutinize the provided "Relevant Information" to synthesize an answer.
+- Analyze the user's query (which may be in Arabic, French, English, etc.).
+- Scrutinize the provided "Relevant Information".
 - If an image is provided, use it as the primary subject of the query. Find information about what is depicted in the image from the indexed text.
 - Synthesize an answer directly from the information found.
-- If the information is not available in the context, you MUST respond with: "I could not find an answer to your question in the available documents."
+- **Language Rule:** Reply in the same language as the user's query.
+- If the information is not available in the context, you MUST respond with: "I could not find an answer to your question in the available documents." (Translated to the user's language).
 - Do not use any external knowledge.
 
 Relevant Information:
