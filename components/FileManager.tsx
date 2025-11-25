@@ -24,7 +24,7 @@ interface FileManagerProps {
   onAddTag: (clientId: string, tagName: string) => void;
   onRemoveTag: (clientId: string, tagId: string) => void;
   onSetSyncInterval: (clientId: string, interval: number | 'MANUAL') => void;
-  onSyncNow: (clientId: string) => Promise<void>;
+  onSyncNow: (clientId: string, forceResync?: boolean) => Promise<void>;
   onSyncFile?: (clientId: string, file: SyncedFile) => Promise<void>;
   isSyncing: boolean;
 }
@@ -378,14 +378,26 @@ const FileManager: React.FC<FileManagerProps> = ({
             <div className="border-t border-gray-700 pt-4 mt-4">
                 <div className="flex items-center justify-between mb-2">
                     <h3 className="text-md font-semibold text-gray-300">Sync Settings</h3>
+                </div>
+                
+                <div className="flex gap-2 mb-3">
                     <button 
-                        onClick={() => onSyncNow(client.id)}
+                        onClick={() => onSyncNow(client.id, false)}
                         disabled={isSyncing || !hasDataSource}
-                        className="text-xs bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md transition-colors disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed flex items-center gap-1.5"
+                        className="flex-grow text-xs bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-3 rounded-md transition-colors disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
-                        {isSyncing ? 'Syncing...' : 'Sync All Sources'}
+                        {isSyncing ? 'Syncing...' : 'Smart Sync (Update Changes)'}
+                    </button>
+                    <button 
+                        onClick={() => onSyncNow(client.id, true)}
+                        disabled={isSyncing || !hasDataSource}
+                        className="flex-grow text-xs bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-gray-500 text-white font-semibold py-2 px-3 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                        title="Force re-download and re-index all files. Use this to apply new AI features to old files."
+                    >
+                        Re-process All (Fix Search)
                     </button>
                 </div>
+
                 <label htmlFor="sync-interval" className="block text-sm font-medium text-gray-400 mb-1">
                     Auto-Sync Frequency
                 </label>

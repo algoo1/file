@@ -215,7 +215,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleSyncNow = useCallback(async (clientId: string) => {
+  const handleSyncNow = useCallback(async (clientId: string, forceResync: boolean = false) => {
     const client = clients.find(c => c.id === clientId);
      const hasDataSource = client?.google_drive_folder_url || 
                           (client?.airtable_api_key && client?.airtable_base_id && client?.airtable_table_id) ||
@@ -267,7 +267,8 @@ const App: React.FC = () => {
     };
 
     try {
-        const result = await apiService.syncDataSource(clientId, onProgress);
+        // Pass undefined for sourceLimit, and forceResync as 4th argument
+        const result = await apiService.syncDataSource(clientId, onProgress, undefined, forceResync);
         handleUpdateClientState(result.client);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

@@ -143,7 +143,7 @@ export const fileSearchService = {
         if (query.trim()) {
             searchResults = localIndex.search(query, {
                 fields: ['name', 'summary'],
-                combineWith: 'AND',
+                combineWith: 'OR',
             });
         } else {
             // If it's an image-only query, we take all documents for context.

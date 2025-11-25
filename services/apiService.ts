@@ -54,11 +54,13 @@ export const apiService = {
    * Missing files are deleted from the database.
    * 
    * @param limitSource Optional. If provided, checks only this source ('GOOGLE_DRIVE' or 'AIRTABLE').
+   * @param forceFullResync Optional. If true, ignores modification times and re-processes all files with AI.
    */
   syncDataSource: async (
     clientId: string, 
     onProgress: (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => void,
-    limitSource?: 'GOOGLE_DRIVE' | 'AIRTABLE'
+    limitSource?: 'GOOGLE_DRIVE' | 'AIRTABLE',
+    forceFullResync?: boolean
   ): Promise<{ client: Client }> => {
     let client = await databaseService.getClientById(clientId);
     const settings = await databaseService.getSettings();
@@ -166,8 +168,11 @@ export const apiService = {
         const isNew = !existing;
         
         if (existing) {
+            if (forceFullResync) {
+                isModified = true;
+            }
             // If previous sync failed, try again
-            if (existing.status === 'FAILED') {
+            else if (existing.status === 'FAILED') {
                 isModified = true;
             } 
             // Check timestamp
@@ -200,7 +205,8 @@ export const apiService = {
             
             // Generate a descriptive status message so the user knows exactly why this is syncing.
             let statusMsg = 'Pending sync...';
-            if (isNew) statusMsg = 'New record detected in source.';
+            if (forceFullResync && !isNew) statusMsg = 'Forced re-processing...';
+            else if (isNew) statusMsg = 'New record detected in source.';
             else if (isModified) {
                 statusMsg = `Detected modification in source (Updated at ${formatDate(sourceFile.source_modified_at)}).`;
             }
