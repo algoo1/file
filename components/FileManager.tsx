@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Client, SyncedFile, Tag } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
@@ -11,6 +12,7 @@ import { CheckCircleIcon } from './icons/CheckCircleIcon.tsx';
 import { XCircleIcon } from './icons/XCircleIcon.tsx';
 import { ClockIcon } from './icons/ClockIcon.tsx';
 import { RefreshIcon } from './icons/RefreshIcon.tsx';
+import { apiService } from '../services/apiService.ts';
 
 interface FileManagerProps {
   client: Client;
@@ -43,11 +45,13 @@ const statusIndicatorClasses = (status: SyncedFile['status']) => {
 };
 
 const formatDate = (isoString?: string) => {
-    if (!isoString) return 'N/A';
+    if (!isoString) return '-';
     try {
         return new Date(isoString).toLocaleString(undefined, {
-            dateStyle: 'medium',
-            timeStyle: 'short',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
         });
     } catch (e) {
         return 'Invalid Date';
@@ -264,6 +268,7 @@ const FileManager: React.FC<FileManagerProps> = ({
   const [newTagName, setNewTagName] = useState('');
   const [viewingFile, setViewingFile] = useState<SyncedFile | null>(null);
   const [syncingFileId, setSyncingFileId] = useState<string | null>(null);
+  const [isSpecificSyncing, setIsSpecificSyncing] = useState<string | null>(null);
 
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
@@ -287,6 +292,17 @@ const FileManager: React.FC<FileManagerProps> = ({
       }
   };
   
+  // Handler for sync source specific buttons
+  const handleSpecificSync = async (source: 'GOOGLE_DRIVE' | 'AIRTABLE') => {
+      if (isSyncing) return;
+      setIsSpecificSyncing(source);
+      try {
+          await onSyncNow(client.id);
+      } finally {
+          setIsSpecificSyncing(null);
+      }
+  };
+  
   const hasDataSource = client.google_drive_folder_url || 
                         (client.airtable_api_key && client.airtable_base_id && client.airtable_table_id) ||
                         (client.airtable_access_token && client.airtable_base_id && client.airtable_table_id);
@@ -298,7 +314,7 @@ const FileManager: React.FC<FileManagerProps> = ({
       if (isSyncing) {
           const processingRecords = airtableRecords.filter(r => r.status === 'SYNCING' || r.status === 'INDEXING');
           if (processingRecords.length > 0) {
-              return { status: 'SYNCING', text: 'Syncing...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
+              return { status: 'SYNCING', text: 'Updating records...', icon: <ClockIcon className="w-5 h-5 text-blue-500 animate-pulse" /> };
           }
       }
       
@@ -306,13 +322,11 @@ const FileManager: React.FC<FileManagerProps> = ({
             return { status: 'FAILED', text: 'Sync failed', icon: <XCircleIcon className="w-5 h-5 text-red-500" /> };
       }
 
-      // If all Airtable records we know about are completed, the sync was successful.
       if (totalAirtableRecords > 0 && airtableRecords.every(r => r.status === 'COMPLETED')) {
           const recordText = totalAirtableRecords === 1 ? 'record' : 'records';
           return { status: 'COMPLETED', text: `Synced (${totalAirtableRecords} ${recordText})`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
       }
       
-      // Fix for "0 records" bug: Only show "Synced (0 records)" if the *entire* sync is complete and no Airtable records were found.
       const isSyncFinished = !isSyncing && client.synced_files.length > 0 && client.synced_files.every(f => f.status === 'COMPLETED' || f.status === 'FAILED');
       if (isSyncFinished && totalAirtableRecords === 0) {
           return { status: 'COMPLETED', text: `Synced (0 records)`, icon: <CheckCircleIcon className="w-5 h-5 text-green-500" /> };
@@ -369,7 +383,7 @@ const FileManager: React.FC<FileManagerProps> = ({
                         disabled={isSyncing || !hasDataSource}
                         className="text-xs bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md transition-colors disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed flex items-center gap-1.5"
                     >
-                        {isSyncing ? 'Syncing...' : 'Sync Now'}
+                        {isSyncing ? 'Syncing...' : 'Sync All Sources'}
                     </button>
                 </div>
                 <label htmlFor="sync-interval" className="block text-sm font-medium text-gray-400 mb-1">
@@ -398,9 +412,23 @@ const FileManager: React.FC<FileManagerProps> = ({
                     {/* Airtable Section */}
                     {client.airtable_base_id && client.airtable_table_id && (
                         <details className="bg-gray-900/50 rounded-lg border border-gray-700" open>
-                            <summary className="p-2 cursor-pointer font-semibold text-gray-300 flex items-center gap-2">
-                                <AirtableIcon className="w-5 h-5 text-yellow-400" />
-                                <span>Airtable Data</span>
+                            <summary className="p-2 cursor-pointer font-semibold text-gray-300 flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                    <AirtableIcon className="w-5 h-5 text-yellow-400" />
+                                    <span>Airtable Data</span>
+                                </div>
+                                 <button 
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        handleSpecificSync('AIRTABLE');
+                                    }}
+                                    disabled={isSyncing}
+                                    className="text-[10px] bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 px-2 py-0.5 rounded flex items-center gap-1 disabled:opacity-50"
+                                    title="Sync Airtable Table Only"
+                                >
+                                    <RefreshIcon className="w-3 h-3" />
+                                    Sync Table
+                                </button>
                             </summary>
                             <div className="p-2 border-t border-gray-700">
                                 <div className="bg-gray-700/50 p-2 rounded-md text-sm mb-2">
@@ -424,29 +452,47 @@ const FileManager: React.FC<FileManagerProps> = ({
                                     const airtableRecords = client.synced_files.filter(f => f.source === 'AIRTABLE');
                                     if (airtableRecords.length > 0) {
                                         return (
-                                            <ul className="space-y-2 pl-2 border-l-2 border-gray-700 mt-2">
-                                                {airtableRecords.map(file => (
-                                                     <li key={file.id} className="flex items-center justify-between bg-gray-800/50 p-1.5 rounded-md text-xs">
-                                                        <span className="truncate text-gray-400 max-w-[60%]" title={file.name}>
-                                                            {file.name}
-                                                        </span>
-                                                        <div className="flex items-center gap-1">
-                                                             <button 
-                                                                onClick={() => handleSingleFileSync(file)}
-                                                                className={`p-1 rounded hover:bg-gray-600 text-gray-400 hover:text-blue-400 transition-colors ${syncingFileId === file.id ? 'animate-spin text-blue-400' : ''}`} 
-                                                                title="Sync this record"
-                                                                disabled={isSyncing}
-                                                            >
-                                                                <RefreshIcon className="w-3 h-3" />
-                                                            </button>
-                                                            <div className={statusIndicatorClasses(file.status)}>
-                                                                <CheckCircleIcon className="w-3 h-3" />
+                                            <div className="space-y-1 mt-2">
+                                                {/* Header Row */}
+                                                <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 px-2 font-semibold uppercase tracking-wider">
+                                                    <div className="col-span-5">Record Name</div>
+                                                    <div className="col-span-5">Last Modified</div>
+                                                    <div className="col-span-2 text-right">Action</div>
+                                                </div>
+                                                
+                                                <ul className="space-y-1">
+                                                    {airtableRecords.map(file => (
+                                                        <li key={file.id} className="grid grid-cols-12 gap-2 items-center bg-gray-800/50 p-2 rounded-md text-xs hover:bg-gray-700/50 transition-colors">
+                                                            <span className="col-span-5 truncate text-gray-300 font-medium" title={file.name}>
+                                                                {file.name}
+                                                            </span>
+                                                            <span className="col-span-5 text-gray-400 truncate font-mono text-[10px]" title={file.source_modified_at}>
+                                                                 {formatDate(file.source_modified_at)}
+                                                            </span>
+                                                            <div className="col-span-2 flex justify-end items-center gap-1">
+                                                                 <button 
+                                                                    onClick={() => handleSingleFileSync(file)}
+                                                                    className={`p-1 rounded hover:bg-gray-600 text-gray-400 hover:text-blue-400 transition-colors ${syncingFileId === file.id ? 'animate-spin text-blue-400' : ''}`} 
+                                                                    title="Sync this record"
+                                                                    disabled={isSyncing}
+                                                                >
+                                                                    <RefreshIcon className="w-3 h-3" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setViewingFile(file)}
+                                                                    className={`p-1 rounded hover:bg-gray-600 ${statusIndicatorClasses(file.status)}`}
+                                                                    title="View Details & Status"
+                                                                >
+                                                                    <EyeIcon className="w-4 h-4" />
+                                                                </button>
                                                             </div>
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
                                         )
+                                    } else if (!isSyncing) {
+                                        return <p className="text-xs text-gray-500 p-2 text-center">No records found. Click Sync to pull data.</p>
                                     }
                                 })()}
                             </div>
@@ -456,9 +502,23 @@ const FileManager: React.FC<FileManagerProps> = ({
                     {/* Google Drive Section */}
                     {client.google_drive_folder_url && (
                        <details className="bg-gray-900/50 rounded-lg border border-gray-700" open>
-                             <summary className="p-2 cursor-pointer font-semibold text-gray-300 flex items-center gap-2">
-                                <DriveIcon className="w-5 h-5 text-blue-400" />
-                                <span>Google Drive Files</span>
+                             <summary className="p-2 cursor-pointer font-semibold text-gray-300 flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                    <DriveIcon className="w-5 h-5 text-blue-400" />
+                                    <span>Google Drive Files</span>
+                                </div>
+                                 <button 
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        handleSpecificSync('GOOGLE_DRIVE');
+                                    }}
+                                    disabled={isSyncing}
+                                    className="text-[10px] bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 px-2 py-0.5 rounded flex items-center gap-1 disabled:opacity-50"
+                                    title="Sync Drive Folder Only"
+                                >
+                                    <RefreshIcon className="w-3 h-3" />
+                                    Sync Folder
+                                </button>
                             </summary>
                             <div className="p-2 border-t border-gray-700">
                                 {(() => {
@@ -543,34 +603,43 @@ const FileManager: React.FC<FileManagerProps> = ({
                         <button onClick={() => setViewingFile(null)} className="text-gray-400 hover:text-white text-2xl">&times;</button>
                     </div>
                     <div className="space-y-3 text-sm">
-                        <div>
-                            <p className="font-semibold text-gray-400">Source</p>
-                            <p className="text-gray-200">{viewingFile.source === 'GOOGLE_DRIVE' ? 'Google Drive' : 'Airtable'}</p>
+                        <div className="bg-gray-900/50 p-3 rounded-md border border-gray-700 mb-4">
+                            <p className="font-semibold text-gray-400 text-xs uppercase tracking-wider mb-1">Update Status</p>
+                             {viewingFile.status_message ? (
+                                <p className={`text-sm ${viewingFile.status_message.includes('successfully') ? 'text-green-400' : 'text-gray-200'}`}>
+                                    {viewingFile.status_message}
+                                </p>
+                             ) : (
+                                 <p className="text-sm text-gray-500">No update information available.</p>
+                             )}
                         </div>
+
                         <div>
                             <p className="font-semibold text-gray-400">Name / ID</p>
-                            <p className="text-gray-200 break-all">{viewingFile.name}</p>
+                            <p className="text-gray-200 break-all font-medium">{viewingFile.name}</p>
                         </div>
-                         <div>
-                            <p className="font-semibold text-gray-400">Status</p>
-                            <p className={`font-semibold capitalize ${statusIndicatorClasses(viewingFile.status)}`}>{viewingFile.status}</p>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="font-semibold text-gray-400">Current Status</p>
+                                <p className={`font-semibold capitalize ${statusIndicatorClasses(viewingFile.status)}`}>{viewingFile.status}</p>
+                            </div>
+                            <div>
+                                <p className="font-semibold text-gray-400">Source</p>
+                                <p className="text-gray-200">{viewingFile.source === 'GOOGLE_DRIVE' ? 'Google Drive' : 'Airtable'}</p>
+                            </div>
                         </div>
+
                         {viewingFile.source_modified_at && (
                              <div>
-                                <p className="font-semibold text-gray-400">{viewingFile.source === 'GOOGLE_DRIVE' ? 'Last Modified (in Drive)' : 'Record Created (in Airtable)'}</p>
-                                <p className="text-gray-200">{formatDate(viewingFile.source_modified_at)}</p>
+                                <p className="font-semibold text-gray-400">{viewingFile.source === 'GOOGLE_DRIVE' ? 'Last Modified (Drive)' : 'Last Update (Airtable)'}</p>
+                                <p className="text-gray-200 font-mono text-xs">{formatDate(viewingFile.source_modified_at)}</p>
                             </div>
                         )}
                         <div>
-                            <p className="font-semibold text-gray-400">Last Synced</p>
-                            <p className="text-gray-200">{formatDate(viewingFile.last_synced_at)}</p>
+                            <p className="font-semibold text-gray-400">Last System Sync</p>
+                            <p className="text-gray-200 font-mono text-xs">{formatDate(viewingFile.last_synced_at)}</p>
                         </div>
-                        {viewingFile.status_message && (
-                             <div>
-                                <p className="font-semibold text-gray-400">Details</p>
-                                <p className="text-gray-300 bg-gray-900/50 p-2 rounded-md whitespace-pre-wrap">{viewingFile.status_message}</p>
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>

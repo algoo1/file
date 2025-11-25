@@ -135,5 +135,14 @@ export const databaseService = {
         
         if (error) throw error;
         return data;
+    },
+
+    deleteClientFiles: async (ids: string[]): Promise<void> => {
+        if (ids.length === 0) return;
+        const { error } = await supabase
+            .from('synced_files')
+            .delete()
+            .in('id', ids);
+        if (error) throw error;
     }
 };

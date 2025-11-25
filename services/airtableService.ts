@@ -10,14 +10,24 @@ const REDIRECT_URI = window.location.origin + window.location.pathname;
 
 
 /**
- * A robust fetch wrapper that provides better error messages for common network failures.
+ * A robust fetch wrapper that provides better error messages and prevents caching.
  * @param url The URL to fetch.
  * @param options The fetch options.
  * @returns A promise that resolves to the Response object.
  */
-async function safeFetch(url: string, options?: RequestInit): Promise<Response> {
+async function safeFetch(url: string, options: RequestInit = {}): Promise<Response> {
     try {
-        return await fetch(url, options);
+        // Ensure we never use cached data for API calls to detect deletions correctly
+        const newOptions = {
+            ...options,
+            headers: {
+                ...options.headers,
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        };
+        return await fetch(url, newOptions);
     } catch (error) {
         if (error instanceof TypeError && error.message === 'Failed to fetch') {
             throw new Error(
@@ -30,16 +40,31 @@ async function safeFetch(url: string, options?: RequestInit): Promise<Response> 
 
 
 const findPrimaryFieldName = (record: any): string => {
-    const commonNames = ['Name', 'Title', 'ID', 'Primary', 'Key', 'Task'];
+    const commonNames = ['Name', 'Title', 'ID', 'Primary', 'Key', 'Task', 'Item'];
     if (record && record.fields) {
         for (const name of commonNames) {
-            if (name in record.fields) return record.fields[name] || record.id;
+            if (record.fields[name]) return String(record.fields[name]);
         }
+        // If no common name, try the first string field
         for(const key in record.fields) {
             if(typeof record.fields[key] === 'string' && record.fields[key]) return record.fields[key];
         }
     }
     return record.id;
+};
+
+const findModifiedTime = (record: any): string => {
+    // Airtable doesn't provide a system-level 'modifiedTime' in the record metadata by default.
+    // We look for common user-created field names that might track modification.
+    const candidates = ['Last Modified', 'Last Modified Time', 'Last Changed', 'Updated', 'Updated At', 'Modification Date'];
+    if (record && record.fields) {
+        for (const field of candidates) {
+            if (record.fields[field]) return String(record.fields[field]);
+        }
+    }
+    // Fallback to createdTime if no specific modification field is found.
+    // Note: This means standard records won't auto-update without a Last Modified field in the table.
+    return record.createdTime;
 };
 
 // PKCE Helper Functions
@@ -202,21 +227,46 @@ export const airtableService = {
       throw new Error("No Airtable authentication method configured for this client.");
   },
 
-  getRecords: async (client: Client, settings: SystemSettings): Promise<{ id: string, name: string, createdTime: string }[]> => {
+  /**
+   * Fetches all records from the Airtable base/table.
+   * Handles pagination automatically to retrieve more than 100 records.
+   */
+  getRecords: async (client: Client, settings: SystemSettings): Promise<{ id: string, name: string, createdTime: string, source_modified_at: string }[]> => {
     const { accessToken } = await airtableService.getAuthToken(client, settings);
-    const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}`;
+    const baseUrl = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}`;
+    
+    let allRecords: any[] = [];
+    let offset: string | undefined;
+
     try {
-      const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch records'} (Code: ${response.status})`);
-      }
-      const data = await response.json();
-      return data.records.map((record: any) => ({ 
-          id: record.id, 
-          name: findPrimaryFieldName(record),
-          createdTime: record.createdTime 
-      }));
+        do {
+            const params = new URLSearchParams();
+            if (offset) params.append('offset', offset);
+            // Cache busting
+            params.append('_t', Date.now().toString());
+            
+            const response = await safeFetch(`${baseUrl}?${params.toString()}`, { 
+                headers: { 'Authorization': `Bearer ${accessToken}` } 
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch records'} (Code: ${response.status})`);
+            }
+
+            const data = await response.json();
+            allRecords = [...allRecords, ...data.records];
+            offset = data.offset;
+
+        } while (offset);
+
+        return allRecords.map((record: any) => ({ 
+            id: record.id, 
+            name: findPrimaryFieldName(record),
+            createdTime: record.createdTime,
+            source_modified_at: findModifiedTime(record)
+        }));
+
     } catch (error) {
         console.error("Failed to fetch records from Airtable:", error);
         throw error;
@@ -225,12 +275,13 @@ export const airtableService = {
 
   getRecordContent: async (client: Client, settings: SystemSettings, recordId: string): Promise<string> => {
     const { accessToken } = await airtableService.getAuthToken(client, settings);
-    const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}/${recordId}`;
+    const url = `https://api.airtable.com/v0/${client.airtable_base_id}/${client.airtable_table_id}/${recordId}?_t=${Date.now()}`;
     try {
       const response = await safeFetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
       if (!response.ok) {
+        // Pass through status code for 404 detection
         const errorData = await response.json();
-        throw new Error(`Airtable API error: ${errorData.error?.message || 'Failed to fetch record content'} (Code: ${response.status})`);
+        throw new Error(`${response.status} Airtable API error: ${errorData.error?.message || 'Failed to fetch record content'}`);
       }
       const record = await response.json();
       return JSON.stringify(record.fields, null, 2);
