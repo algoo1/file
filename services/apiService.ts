@@ -1,12 +1,11 @@
 
 import { databaseService } from './databaseService.ts';
 import { googleDriveService } from './googleDriveService.ts';
-import { airtableService } from './airtableService.ts';
 import { fileSearchService } from './fileSearchService.ts';
 import { SystemSettings, Client, FileObject, SyncedFile, Tag } from '../types.ts';
 
 // This service is the main public API for the UI.
-// It orchestrates calls to the other services (database, google, airtable, file search).
+// It orchestrates calls to the other services (database, google, file search).
 export const apiService = {
   getInitialData: async () => {
     const [clients, settings] = await Promise.all([
@@ -53,13 +52,13 @@ export const apiService = {
    * Unchanged files are re-indexed using the data already in the database.
    * Missing files are deleted from the database.
    * 
-   * @param limitSource Optional. If provided, checks only this source ('GOOGLE_DRIVE' or 'AIRTABLE').
+   * @param limitSource Optional. If provided, checks only this source (Only 'GOOGLE_DRIVE' supported now).
    * @param forceFullResync Optional. If true, ignores modification times and re-processes all files with AI.
    */
   syncDataSource: async (
     clientId: string, 
     onProgress: (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => void,
-    limitSource?: 'GOOGLE_DRIVE' | 'AIRTABLE',
+    limitSource?: 'GOOGLE_DRIVE',
     forceFullResync?: boolean
   ): Promise<{ client: Client }> => {
     let client = await databaseService.getClientById(clientId);
@@ -68,26 +67,17 @@ export const apiService = {
     if (!client) throw new Error("Client not found.");
     if (!settings.file_search_service_api_key) throw new Error("File Search Service API Key is not set.");
 
-    // Check configuration based on limitSource or general config
+    // Check configuration
     const isDriveConfigured = !!client.google_drive_folder_url && settings.is_google_drive_connected;
-    let isAirtableConfigured = (!!client.airtable_api_key || !!client.airtable_access_token) && !!client.airtable_base_id && !!client.airtable_table_id;
 
-    const checkDrive = (!limitSource || limitSource === 'GOOGLE_DRIVE') && isDriveConfigured;
-    const checkAirtable = (!limitSource || limitSource === 'AIRTABLE') && isAirtableConfigured;
-
-    if (!checkDrive && !checkAirtable) {
-       // If specifically requested a source but it's not configured, throw helpful error
-       if (limitSource === 'GOOGLE_DRIVE' && !isDriveConfigured) throw new Error("Google Drive is not configured for this client.");
-       if (limitSource === 'AIRTABLE' && !isAirtableConfigured) throw new Error("Airtable is not configured for this client.");
-       
-       // If general sync, but nothing configured
-       if (!limitSource && !isDriveConfigured && !isAirtableConfigured) throw new Error("No data source is configured for this client.");
+    if (!isDriveConfigured) {
+       throw new Error("Google Drive is not configured for this client.");
     }
     
     // 1. Fetch Metadata from Sources
     let allSourceFilesMeta: (Omit<FileObject, 'content' | 'summary' | 'status' | 'statusMessage'>)[] = [];
 
-    if (checkDrive) {
+    if (isDriveConfigured) {
         try {
             const driveFilesMeta = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
             const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
@@ -109,41 +99,17 @@ export const apiService = {
         }
     }
 
-    if (checkAirtable) {
-      try {
-        const { newTokensToSave } = await airtableService.getAuthToken(client, settings);
-        if (newTokensToSave) {
-          client = await databaseService.updateClient(client.id, newTokensToSave);
-        }
-        const airtableRecordsMeta = await airtableService.getRecords(client, settings);
-        allSourceFilesMeta.push(...airtableRecordsMeta.map(r => ({ 
-            id: r.id, 
-            name: r.name, 
-            type: 'record' as const, 
-            source: 'AIRTABLE' as const, 
-            mimeType: 'application/json',
-            source_modified_at: r.source_modified_at || r.createdTime // Use modified if available, else created
-        })));
-      } catch (authError) {
-          console.error("Airtable error:", authError);
-          throw authError; // Propagate error for UI feedback
-      }
-    }
-
     // 2. Determine Work to be Done (Smart Diff)
     // Because the index is in-memory, we must clear it and rebuild it every time we "Sync" or reload.
     await fileSearchService.clearIndexForClient(clientId);
     
-    // Get existing files. If filtering by source, only consider existing files from that source.
-    const allExistingFiles = client.synced_files;
-    const relevantExistingFiles = limitSource 
-        ? allExistingFiles.filter(f => f.source === limitSource)
-        : allExistingFiles;
+    // Get existing files.
+    const relevantExistingFiles = client.synced_files;
     
     const existingFilesMap = new Map(relevantExistingFiles.map(f => [f.source_item_id, f]));
     const sourceIds = new Set(allSourceFilesMeta.map(f => f.id));
     
-    // 2a. Detect Deletions (only for the sources we are checking)
+    // 2a. Detect Deletions (Files no longer in source)
     const filesToDelete = relevantExistingFiles.filter(f => !sourceIds.has(f.source_item_id));
     if (filesToDelete.length > 0) {
         await databaseService.deleteClientFiles(filesToDelete.map(f => f.id));
@@ -154,12 +120,7 @@ export const apiService = {
     const filesToProcess: typeof allSourceFilesMeta = [];
     const unchangedFiles: SyncedFile[] = [];
     const initialListPayload: Partial<SyncedFile>[] = [];
-
-    // Also include files from OTHER sources (if we aren't syncing them) in the index restore
-    if (limitSource) {
-        const otherFiles = allExistingFiles.filter(f => f.source !== limitSource);
-        unchangedFiles.push(...otherFiles);
-    }
+    const modifiedFileIdsToDelete: string[] = [];
 
     for (const sourceFile of allSourceFilesMeta) {
         const existing = existingFilesMap.get(sourceFile.id);
@@ -178,16 +139,13 @@ export const apiService = {
             // Check timestamp
             else if (sourceFile.source_modified_at && existing.source_modified_at) {
                 // If timestamp strings differ, update. 
-                // We use strings for Airtable custom fields and Dates for Drive.
                 if (sourceFile.source_modified_at !== existing.source_modified_at) {
-                    // Double check with Date parsing to allow for slight format diffs if they are valid dates
                     const newTime = new Date(sourceFile.source_modified_at).getTime();
                     const oldTime = new Date(existing.source_modified_at).getTime();
                     if (!isNaN(newTime) && !isNaN(oldTime)) {
                          // 1 second tolerance
                         if (Math.abs(newTime - oldTime) > 1000) isModified = true;
                     } else {
-                        // String comparison for non-standard date strings
                         isModified = true;
                     }
                 }
@@ -201,24 +159,31 @@ export const apiService = {
         }
 
         if (isNew || isModified) {
+            // New Logic: "This file will be deleted from the data ... uploaded again with modifications"
+            // If modified, queue it for deletion so we get a clean slate (fresh insert, fresh index).
+            if (isModified && existing) {
+                modifiedFileIdsToDelete.push(existing.id);
+            }
+
             filesToProcess.push(sourceFile);
             
-            // Generate a descriptive status message so the user knows exactly why this is syncing.
+            // Generate a descriptive status message
             let statusMsg = 'Pending sync...';
             if (forceFullResync && !isNew) statusMsg = 'Forced re-processing...';
-            else if (isNew) statusMsg = 'New record detected in source.';
+            else if (isNew) statusMsg = 'New file detected.';
             else if (isModified) {
-                statusMsg = `Detected modification in source (Updated at ${formatDate(sourceFile.source_modified_at)}).`;
+                statusMsg = `Content modified. Cleaning old data and re-importing...`;
             }
 
             initialListPayload.push({
                 source_item_id: sourceFile.id,
                 name: sourceFile.name,
-                status: existing ? 'SYNCING' : 'IDLE',
+                status: 'SYNCING', // Always Syncing since we are re-processing
                 type: sourceFile.type,
                 source: sourceFile.source,
                 source_modified_at: sourceFile.source_modified_at,
-                id: existing?.id, // Preserve ID if update
+                // If we are deleting the old record, do not pass the old ID.
+                id: (isModified && existing) ? undefined : existing?.id, 
                 status_message: statusMsg
             });
         } else {
@@ -226,6 +191,12 @@ export const apiService = {
             unchangedFiles.push(existing!);
             initialListPayload.push(existing!);
         }
+    }
+
+    // Execute deletion of modified files to ensure "Delete then Upload" behavior
+    if (modifiedFileIdsToDelete.length > 0) {
+        await databaseService.deleteClientFiles(modifiedFileIdsToDelete);
+        console.log(`Deleted ${modifiedFileIdsToDelete.length} modified files from database to ensure fresh sync.`);
     }
 
     // Notify UI about the state of files before we start processing
@@ -246,17 +217,14 @@ export const apiService = {
 
         const processedBatch = await Promise.all(batch.map(async (fileMeta) => {
             let finalFileObject: FileObject;
-            const existingId = existingFilesMap.get(fileMeta.id)?.id;
-            const isUpdate = !!existingId;
-
+            // Since we deleted modified files, we treat everything here as a new insert (id=undefined).
+            
             try {
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Fetching content...' }});
                 
                 let content = '';
                 if (fileMeta.source === 'GOOGLE_DRIVE') {
                     content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
-                } else if (fileMeta.source === 'AIRTABLE') {
-                    content = await airtableService.getRecordContent(client!, settings, fileMeta.id);
                 }
 
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Processing with AI...' }});
@@ -265,7 +233,7 @@ export const apiService = {
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
                 
                 // Add success message
-                finalFileObject.statusMessage = isUpdate ? 'Record updated successfully.' : 'New record synced successfully.';
+                finalFileObject.statusMessage = 'File synced successfully.';
 
             } catch (error) {
                  console.error(`Error processing ${fileMeta.name}:`, error);
@@ -281,7 +249,7 @@ export const apiService = {
             const updatePayload = {
                 ...finalFileObject,
                 last_synced_at: new Date().toISOString(),
-                id: existingId,
+                id: undefined, // Always undefined to force INSERT
                 client_id: clientId
             };
 
@@ -300,11 +268,11 @@ export const apiService = {
              summary: f.summary,
              last_synced_at: new Date().toISOString(),
              source_modified_at: f.source_modified_at,
-             id: (f as any).id // uuid from DB
+             id: undefined // Force INSERT
         })));
     }
 
-    // 5. Update Database (Upsert)
+    // 5. Update Database (Upsert/Insert)
     if (finalUpdates.length > 0) {
         await databaseService.updateClientFiles(clientId, finalUpdates);
     }
@@ -317,7 +285,7 @@ export const apiService = {
   },
 
   /**
-   * Syncs a single file or record manually.
+   * Syncs a single file manually.
    * Forces a re-download and re-summarization regardless of timestamps.
    */
   syncSingleFile: async (
@@ -328,16 +296,16 @@ export const apiService = {
       let client = await databaseService.getClientById(clientId);
       if (!client || !settings.file_search_service_api_key) throw new Error("Configuration error.");
 
-      // Update status to syncing in DB/UI immediately
-      await databaseService.updateClientFiles(clientId, [{ ...file, status: 'SYNCING', status_message: 'Manual update triggered...' }]);
-      
+      // CLEAN SLATE: Delete the existing file first.
+      await databaseService.deleteClientFiles([file.id]);
+
       try {
           let content = '';
           // We need fresh metadata (like modified time) first
           let updatedMeta = { 
               name: file.name, 
               source_modified_at: file.source_modified_at || new Date().toISOString(),
-              mimeType: file.type === 'record' ? 'application/json' : 'application/pdf' // Default
+              mimeType: file.type === 'image' ? 'image/jpeg' : 'application/pdf' // Default fallback
           };
 
           if (file.source === 'GOOGLE_DRIVE') {
@@ -352,34 +320,12 @@ export const apiService = {
                     };
                     content = await googleDriveService.getFileContent(file.source_item_id, currentMeta.mimeType);
                 } else {
-                    // Drive file missing from list
-                     throw new Error("404: File not found in Google Drive folder.");
+                    // Drive file missing from list. Since we deleted it from DB, we just stop here.
+                     console.log("File not found on drive, identifying as deleted.");
+                     const updatedClient = await databaseService.getClientById(clientId);
+                     return { client: updatedClient! };
                 }
              } catch (error: any) {
-                 if (error.message.includes('404') || error.message.includes('Not Found')) {
-                    console.log(`File ${file.name} deleted from Google Drive. Removing from system.`);
-                    await databaseService.deleteClientFiles([file.id]);
-                    const updatedClient = await databaseService.getClientById(clientId);
-                    return { client: updatedClient! };
-                 }
-                 throw error;
-             }
-          } else if (file.source === 'AIRTABLE') {
-             try {
-                 const { newTokensToSave } = await airtableService.getAuthToken(client, settings);
-                 if (newTokensToSave) client = await databaseService.updateClient(client.id, newTokensToSave);
-                 
-                 // For manual sync, we assume we want the latest content regardless of timestamp.
-                 content = await airtableService.getRecordContent(client!, settings, file.source_item_id);
-                 updatedMeta.source_modified_at = new Date().toISOString(); // Update timestamp to now to indicate recent check
-             } catch(error: any) {
-                 // Check for 404 (Not Found) which indicates the record was deleted.
-                 if (error.message.includes('404') || error.message.includes('NOT_FOUND')) {
-                    console.log(`Record ${file.name} deleted from Airtable. Removing from system.`);
-                    await databaseService.deleteClientFiles([file.id]);
-                    const updatedClient = await databaseService.getClientById(clientId);
-                    return { client: updatedClient! };
-                 }
                  throw error;
              }
           }
@@ -397,7 +343,7 @@ export const apiService = {
           const processed = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
 
           const updatePayload: Partial<SyncedFile> = {
-              id: file.id, // UUID
+              // No ID provided, so it inserts a new record
               client_id: clientId,
               source_item_id: file.source_item_id,
               name: processed.name,
@@ -414,11 +360,15 @@ export const apiService = {
 
       } catch (error) {
           console.error("Single sync failed:", error);
+          // Re-insert an error record since we deleted the original
           await databaseService.updateClientFiles(clientId, [{
-              id: file.id,
               client_id: clientId,
+              source_item_id: file.source_item_id,
+              name: file.name,
               status: 'FAILED',
-              status_message: error instanceof Error ? error.message : 'Failed'
+              status_message: error instanceof Error ? error.message : 'Failed',
+              type: file.type,
+              source: file.source
           }]);
       }
 

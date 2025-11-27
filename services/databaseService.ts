@@ -1,3 +1,4 @@
+
 import { supabase } from './supabaseClient.ts';
 import { Client, SystemSettings, SyncedFile, FileObject, Tag } from '../types.ts';
 

@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Client } from '../types.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
+import TelegramConfig from './TelegramConfig.tsx';
 
 interface ClientManagerProps {
   clients: Client[];
@@ -19,6 +20,8 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, selectedClientId
     setNewClientName('');
   };
 
+  const selectedClient = clients.find(c => c.id === selectedClientId);
+
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-lg">
       <h2 className="text-lg font-semibold mb-3 text-white">Clients</h2>
@@ -34,7 +37,7 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, selectedClientId
           <PlusIcon className="w-5 h-5" />
         </button>
       </form>
-      <div className="max-h-48 overflow-y-auto">
+      <div className="max-h-48 overflow-y-auto mb-2">
         {clients.length > 0 ? (
             <ul className="space-y-2">
             {clients.map(client => (
@@ -56,6 +59,18 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, selectedClientId
             <p className="text-gray-500 text-sm text-center py-4">No clients yet.</p>
         )}
       </div>
+
+      {selectedClient && (
+        <TelegramConfig 
+            client={selectedClient} 
+            onUpdate={(updated) => {
+                // This state update is usually handled by the parent App component re-rendering via api calls,
+                // but we trigger a refresh logic implicitly by the database save.
+                // The parent App will see the update in next render if passed up.
+                // For now, we rely on the DB save success alert.
+            }}
+        />
+      )}
     </div>
   );
 };

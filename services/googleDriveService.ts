@@ -1,7 +1,8 @@
+
 import { FileObject } from '../types.ts';
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file'; // Scopes updated to allow writing
 
 let tokenClient: any = null;
 let gapiClientInitialized = false;
@@ -292,4 +293,58 @@ export const googleDriveService = {
         throw new Error(`Failed to download file content. Error: ${err.result?.error?.message || err.message}`);
     }
   },
+
+  /**
+   * Updates the content of a file on Google Drive (overwrites it).
+   * Note: This strictly handles text-based updates (CSV, TXT) converted to media upload.
+   * @param fileId The ID of the file to update.
+   * @param newContent The new string content.
+   * @param mimeType The MIME type (e.g., 'text/csv').
+   */
+  updateFileContent: async (fileId: string, newContent: string, mimeType: string): Promise<void> => {
+      const gapi = window.gapi as any;
+      await ensureAccessToken();
+      const token = gapi?.client?.getToken();
+
+      // For Google Sheets, we cannot just PUT text/csv. We must update via upload API using multipart.
+      // However, GAPI client doesn't support multipart easily. We use fetch.
+      
+      const metadata = {
+          mimeType: mimeType, // This might need to be 'application/vnd.google-apps.spreadsheet' if we want it to stay a sheet
+      };
+
+      // Construct a multipart request body.
+      const boundary = 'foo_bar_baz';
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const close_delim = "\r\n--" + boundary + "--";
+
+      const multipartRequestBody =
+          delimiter +
+          'Content-Type: application/json\r\n\r\n' +
+          JSON.stringify(metadata) +
+          delimiter +
+          `Content-Type: ${mimeType}\r\n\r\n` +
+          newContent +
+          close_delim;
+
+      try {
+        const response = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${token.access_token}`,
+                'Content-Type': `multipart/related; boundary=${boundary}`
+            },
+            body: multipartRequestBody
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || 'Failed to update file');
+        }
+        console.log(`File ${fileId} updated successfully.`);
+      } catch (error) {
+          console.error("Update failed:", error);
+          throw error;
+      }
+  }
 };

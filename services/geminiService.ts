@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { FileObject } from '../types.ts';
 
@@ -39,6 +40,7 @@ export async function summarizeSingleContent(
   
   let contents: any;
 
+  // --- STRATEGY 1: IMAGE PROCESSING ---
   if (file.type === 'image') {
     // Advanced multimodal prompt for structured data extraction and description with multilingual support
     const prompt = `You are an advanced AI assistant specializing in multimodal data extraction and analysis for a global search index. Your task is to process the provided image and generate a structured, text-based representation of its content.
@@ -76,11 +78,50 @@ export async function summarizeSingleContent(
             },
         ],
     };
-  } else {
-    // Text-based summarization for PDFs, Sheets, Airtable records, etc.
+  } 
+  // --- STRATEGY 2: GOOGLE SHEET / CSV PROCESSING (Specialized for Products) ---
+  else if (file.type === 'sheet') {
+      // We pass the raw CSV data. Gemini Flash has a huge context window, so it can handle large sheets.
+      const prompt = `You are an expert **Product Inventory Manager** and Data Analyst. 
+I have exported a Google Sheet containing product data into CSV format. Your job is to create a highly accurate, structured index of this data.
+
+**File Name:** ${file.name}
+
+**CORE OBJECTIVES:**
+1.  **Column Mapping:** Analyze the CSV headers. Identify which columns correspond to:
+    *   **Product Name** (e.g., Item, Title, Name)
+    *   **Price** (e.g., Cost, MSRP, Value)
+    *   **Description** (e.g., Details, Specs, Notes)
+    *   **Image** (e.g., Image URL, Photo Link, Asset)
+    *   **ID/SKU** (if present)
+
+2.  **Data Extraction & Structuring:** 
+    *   Do NOT just summarize the "vibe" of the file. 
+    *   List the products found in the sheet.
+    *   For every key product, provide a structured summary in the following format:
+        *   **Product:** [Name]
+        *   **Price:** [Price]
+        *   **Details:** [Key description points]
+        *   **Image Reference:** [URL or filename if found]
+
+3.  **Foundation for Editing (Internal Thought):**
+    *   Note the explicit column names found in the header. (e.g., "The Price column is labeled 'Retail_Price'"). This is crucial for future data modification tasks.
+
+4.  **Multilingual Indexing:**
+    *   Translate the *categories* and *product types* into **Arabic, English, French, and Spanish** and list them at the bottom as tags.
+
+**Input CSV Data:**
+\`\`\`csv
+${file.content}
+\`\`\`
+`;
+      contents = prompt;
+  }
+  // --- STRATEGY 3: GENERAL DOCUMENTS (PDFs, Text) ---
+  else {
     const MAX_CONTENT_LENGTH = 800000;
     const truncatedContent = file.content.substring(0, MAX_CONTENT_LENGTH);
-    const prompt = `You are an expert data analysis AI. I will provide you with content from a file or database record. Your goal is to generate a structured summary for a **multilingual** search index.
+    const prompt = `You are an expert data analysis AI. I will provide you with content from a file or document. Your goal is to generate a structured summary for a **multilingual** search index.
 
 Follow these instructions:
 1.  **Main Topic:** Briefly state the main purpose or topic of the content (in the content's original language).
@@ -94,7 +135,7 @@ Follow these instructions:
 
 Base your summary *only* on the provided content.
 
-Record/File Name: ${file.name}
+File Name: ${file.name}
 Content:
 ---
 ${truncatedContent}

@@ -1,3 +1,4 @@
+
 // A single place for all our data structures, aligned with the Supabase schema.
 
 /** Represents a file synced from a data source, as stored in the database. */
@@ -8,8 +9,8 @@ export interface SyncedFile {
   name: string;
   status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
   status_message?: string;
-  type: 'pdf' | 'sheet' | 'image' | 'record';
-  source: 'GOOGLE_DRIVE' | 'AIRTABLE';
+  type: 'pdf' | 'sheet' | 'image';
+  source: 'GOOGLE_DRIVE';
   summary?: string;
   last_synced_at?: string; // ISO 8601 timestamp
   source_modified_at?: string; // ISO 8601 timestamp from the source
@@ -21,13 +22,13 @@ export interface SyncedFile {
 export interface FileObject {
     id: string; // source_item_id
     name: string;
-    type: 'pdf' | 'sheet' | 'image' | 'record';
+    type: 'pdf' | 'sheet' | 'image';
     mimeType: string;
     content: string;
     summary: string;
     status: 'IDLE' | 'SYNCING' | 'INDEXING' | 'COMPLETED' | 'FAILED';
     statusMessage?: string;
-    source: 'GOOGLE_DRIVE' | 'AIRTABLE';
+    source: 'GOOGLE_DRIVE';
     source_modified_at?: string;
 }
 
@@ -42,14 +43,20 @@ export interface Client {
   id: string; // uuid
   name: string;
   api_key: string;
-  sync_interval: number | 'MANUAL';
   google_drive_folder_url: string | null;
-  airtable_api_key: string | null;
-  airtable_base_id: string | null;
-  airtable_table_id: string | null;
-  airtable_access_token: string | null;
-  airtable_refresh_token: string | null;
-  airtable_token_expires_at: string | null; // ISO 8601 timestamp
+  
+  // Airtable fields
+  airtable_access_token?: string | null;
+  airtable_refresh_token?: string | null;
+  airtable_token_expires_at?: string | null;
+  airtable_api_key?: string | null;
+  airtable_base_id?: string | null;
+  airtable_table_id?: string | null;
+
+  // Telegram fields
+  telegram_bot_token?: string | null;
+  telegram_allowed_chat_ids?: string | null; // Comma separated IDs
+
   created_at: string;
   updated_at: string;
   // These are relational fields, hydrated by the application
@@ -63,8 +70,10 @@ export interface SystemSettings {
   google_api_key: string | null;
   google_client_id: string | null;
   is_google_drive_connected: boolean;
-  airtable_client_id: string | null;
-  is_airtable_connected: boolean;
+
+  // Airtable fields
+  airtable_client_id?: string | null;
+
   created_at: string;
   updated_at: string;
 }

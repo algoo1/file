@@ -3,9 +3,8 @@ import { Client } from '../types.ts';
 import { SearchIcon } from './icons/SearchIcon.tsx';
 import { ImageIcon } from './icons/ImageIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
-import { AirtableIcon } from './icons/AirtableIcon.tsx';
 
-type SearchSource = 'ALL' | 'GOOGLE_DRIVE' | 'AIRTABLE';
+type SearchSource = 'ALL' | 'GOOGLE_DRIVE';
 
 interface SearchInterfaceProps {
   client: Client;
@@ -50,8 +49,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
   }, [onSearch, query, selectedImage, searchSource]);
   
   const hasGoogleDrive = !!client.google_drive_folder_url;
-  const hasAirtable = (!!client.airtable_api_key || !!client.airtable_access_token) && !!client.airtable_base_id && !!client.airtable_table_id;
-  const hasDataSource = hasGoogleDrive || hasAirtable;
+  const hasDataSource = hasGoogleDrive;
   const hasContentToSearch = query.trim() || selectedImage;
   const canSearch = !isLoading && hasContentToSearch && hasDataSource;
 
@@ -86,7 +84,6 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
             <span className="text-sm font-medium text-gray-400">Search in:</span>
             <SourceButton source="ALL" label="All Sources" icon={<>🗂️</>} enabled={hasDataSource} />
             <SourceButton source="GOOGLE_DRIVE" label="Google Drive" icon={<DriveIcon className="w-4 h-4" />} enabled={hasGoogleDrive} />
-            <SourceButton source="AIRTABLE" label="Airtable" icon={<AirtableIcon className="w-4 h-4" />} enabled={hasAirtable} />
         </div>
 
         {selectedImage && (

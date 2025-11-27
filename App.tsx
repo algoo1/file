@@ -1,16 +1,16 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Client, SystemSettings, SyncedFile, Tag } from './types.ts';
 import { apiService } from './services/apiService.ts';
-import { airtableService } from './services/airtableService.ts';
 import { googleDriveService } from './services/googleDriveService.ts';
 import { fileSearchService } from './services/fileSearchService.ts';
 import ClientManager from './components/ClientManager.tsx';
 import FileManager from './components/FileManager.tsx';
 import SearchInterface from './components/SearchInterface.tsx';
+import DataEditor from './components/DataEditor.tsx';
 import ApiDetails from './components/ApiDetails.tsx';
 import Settings from './components/Settings.tsx';
 import GoogleAuthModal from './components/GoogleAuthModal.tsx';
-import AirtableAuthModal from './components/AirtableAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
 import { XCircleIcon } from './components/icons/XCircleIcon.tsx';
 
@@ -21,7 +21,11 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState(false);
-  const [isAirtableAuthModalOpen, setIsAirtableAuthModalOpen] = useState(false);
+  
+  // New state for switching views
+  const [activeTab, setActiveTab] = useState<'search' | 'edit'>('search');
+  
+  // Track syncing state strictly to prevent overlapping syncs during the 10s polling
   const [isSyncingClient, setIsSyncingClient] = useState<string | null>(null);
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
@@ -29,41 +33,6 @@ const App: React.FC = () => {
   const handleUpdateClientState = (updatedClient: Client) => {
     setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
   };
-
-  // Effect to handle Airtable OAuth callback
-  useEffect(() => {
-    const handleAirtableRedirect = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get('code');
-      const state = params.get('state'); // Contains clientId
-      
-      if (code && state) {
-        console.log("Detected Airtable OAuth callback.");
-        const clientId = state;
-        const currentClient = clients.find(c => c.id === clientId);
-
-        // Clean the URL
-        window.history.replaceState({}, document.title, window.location.pathname);
-        
-        if (currentClient && settings?.airtable_client_id) {
-          try {
-            const tokenData = await airtableService.handleOAuthCallback(code, settings.airtable_client_id);
-            const updatedClient = await apiService.updateClient(clientId, tokenData);
-            handleUpdateClientState(updatedClient);
-            setSelectedClientId(clientId); // Ensure the client is selected
-            alert("Airtable connected successfully!");
-          } catch (error) {
-            console.error("Airtable OAuth failed:", error);
-            alert(`Failed to connect Airtable: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-      }
-    };
-
-    if (clients.length > 0 && settings) {
-      handleAirtableRedirect();
-    }
-  }, [clients, settings]); // Run when clients and settings are loaded
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -97,31 +66,77 @@ const App: React.FC = () => {
     }
   }, [settings]);
 
-  // Background sync effect
+  // FIXED SYNC MECHANISM: 10 Seconds Loop
   useEffect(() => {
-    const hasDataSource = selectedClient?.google_drive_folder_url || 
-                          (selectedClient?.airtable_api_key && selectedClient?.airtable_base_id && selectedClient?.airtable_table_id) ||
-                          (selectedClient?.airtable_access_token && selectedClient?.airtable_base_id && selectedClient?.airtable_table_id);
+    const hasDataSource = !!selectedClient?.google_drive_folder_url;
 
-    if (!selectedClient || selectedClient.sync_interval === 'MANUAL' || !hasDataSource) {
+    if (!selectedClient || !hasDataSource) {
       return;
     }
 
     const syncClientData = async () => {
       if (!selectedClient?.id) return;
-      console.log(`Auto-syncing for client: ${selectedClient.name} with interval ${selectedClient.sync_interval}ms`);
+      
+      // Prevent overlapping syncs if the previous one is still running
+      if (isSyncingClient === selectedClient.id) {
+          console.log(`Sync for ${selectedClient.name} skipped: Previous sync still in progress.`);
+          return;
+      }
+
+      console.log(`[Auto-Sync] Checking for modifications for client: ${selectedClient.name}...`);
+      
+      // Do not set global isSyncingClient here for background auto-syncs to avoid locking the UI constantly.
+      // We only lock for manual "Sync Now" actions. 
+      // However, we need a local lock for this effect.
+      // Actually, since we want to show feedback (uploading/deleting), let's use a lightweight progress callback.
+
+      // We define a lightweight progress handler just to update state, not to block UI interaction
+      const onProgress = (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => {
+           setClients(prevClients => 
+              prevClients.map(c => {
+                  if (c.id === selectedClient.id) {
+                      let updatedFiles: SyncedFile[];
+                      if (event.type === 'INITIAL_LIST') {
+                          updatedFiles = event.files.map(f => {
+                              const existing = c.synced_files.find(ef => ef.source_item_id === f.source_item_id);
+                              return {
+                                ...(existing || {}),
+                                ...f,
+                                id: f.id || existing?.id || crypto.randomUUID(),
+                                client_id: selectedClient.id,
+                                status: f.status || 'IDLE',
+                                created_at: existing?.created_at || new Date().toISOString(),
+                                updated_at: new Date().toISOString(),
+                              } as SyncedFile;
+                          });
+                      } else {
+                          updatedFiles = c.synced_files.map(f =>
+                              f.source_item_id === event.update.source_item_id ? { ...f, ...event.update } : f
+                          );
+                      }
+                      return { ...c, synced_files: updatedFiles };
+                  }
+                  return c;
+              })
+          );
+      };
+
       try {
-        const result = await apiService.syncDataSource(selectedClient.id, () => {});
+        const result = await apiService.syncDataSource(selectedClient.id, onProgress);
         handleUpdateClientState(result.client);
-        console.log(`Auto-sync successful for ${selectedClient.name}.`);
+        console.log(`[Auto-Sync] Completed for ${selectedClient.name}.`);
       } catch (error) {
-        console.error(`Auto-sync failed for ${selectedClient.name}:`, error);
+        console.error(`[Auto-Sync] Failed for ${selectedClient.name}:`, error);
       }
     };
 
-    const intervalId = setInterval(syncClientData, selectedClient.sync_interval as number);
+    // Initial sync on mount/selection
+    syncClientData();
+
+    // Set interval for 10 seconds
+    const intervalId = setInterval(syncClientData, 10000);
     return () => clearInterval(intervalId);
-  }, [selectedClient]);
+  }, [selectedClient?.id, selectedClient?.google_drive_folder_url]); // Dependencies strictly on ID and URL
 
 
   const handleSaveSettings = useCallback(async (newSettings: Partial<SystemSettings>) => {
@@ -155,29 +170,6 @@ const App: React.FC = () => {
     }
   }, [handleSaveSettings]);
 
-  const handleSaveAirtableSettings = useCallback(async (creds: { clientId: string; }) => {
-    try {
-      await handleSaveSettings({ 
-        airtable_client_id: creds.clientId,
-       });
-      const finalSettings = await apiService.saveSettings({ is_airtable_connected: true });
-      setSettings(finalSettings);
-      setIsAirtableAuthModalOpen(false);
-      alert("Airtable settings saved. You can now connect clients using OAuth.");
-    } catch(error) {
-      console.error("Failed to save Airtable settings:", error);
-      alert("Failed to save Airtable settings.");
-    }
-  }, [handleSaveSettings]);
-
-  const handleInitiateAirtableOAuth = useCallback((clientId: string) => {
-    if (settings?.airtable_client_id) {
-      airtableService.initiateOAuth(settings.airtable_client_id, clientId);
-    } else {
-      alert("Airtable integration has not been set up in Settings.");
-    }
-  }, [settings]);
-
   const handleAddClient = useCallback(async (name: string) => {
     if (name.trim()) {
       const newClient = await apiService.addClient(name);
@@ -195,15 +187,6 @@ const App: React.FC = () => {
     handleUpdateClientState(updatedClient);
   }, []);
 
-   const handleSetAirtableDetails = useCallback(async (clientId: string, details: Partial<Client>) => {
-    const updatedClient = await apiService.updateClient(clientId, details);
-    handleUpdateClientState(updatedClient);
-  }, []);
-
-  const handleSetSyncInterval = useCallback(async (clientId: string, interval: number | 'MANUAL') => {
-    const updatedClient = await apiService.updateClient(clientId, { sync_interval: interval });
-    handleUpdateClientState(updatedClient);
-  }, []);
 
   const handleSyncFile = useCallback(async (clientId: string, file: SyncedFile) => {
     try {
@@ -217,30 +200,21 @@ const App: React.FC = () => {
 
   const handleSyncNow = useCallback(async (clientId: string, forceResync: boolean = false) => {
     const client = clients.find(c => c.id === clientId);
-     const hasDataSource = client?.google_drive_folder_url || 
-                          (client?.airtable_api_key && client?.airtable_base_id && client?.airtable_table_id) ||
-                          (client?.airtable_access_token && client?.airtable_base_id && client?.airtable_table_id);
+     const hasDataSource = !!client?.google_drive_folder_url;
 
     if (!hasDataSource) {
-        alert("Please configure at least one data source before syncing.");
+        alert("Please configure a Google Drive folder before syncing.");
         return;
     }
 
     setIsSyncingClient(clientId);
     
-    // Type definition for progress callback events.
-    type ProgressEvent = { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } };
-
-    const onProgress = (event: ProgressEvent) => {
+    const onProgress = (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => {
       setClients(prevClients => 
           prevClients.map(c => {
               if (c.id === clientId) {
                   let updatedFiles: SyncedFile[];
                   if (event.type === 'INITIAL_LIST') {
-                      // For partial updates, we need to merge with existing files, not replace blindly if they aren't in the initial list
-                      // However, syncDataSource provides the FULL list of current source items in 'INITIAL_LIST'.
-                      // We map partial file data to full SyncedFile structure, using existing data where possible.
-                      
                       updatedFiles = event.files.map(f => {
                           const existing = c.synced_files.find(ef => ef.source_item_id === f.source_item_id);
                           return {
@@ -253,8 +227,7 @@ const App: React.FC = () => {
                             updated_at: new Date().toISOString(),
                           } as SyncedFile;
                       });
-                  } else { // 'FILE_UPDATE'
-                      // Find and update the specific file in the client's list.
+                  } else { 
                       updatedFiles = c.synced_files.map(f =>
                           f.source_item_id === event.update.source_item_id ? { ...f, ...event.update } : f
                       );
@@ -267,7 +240,6 @@ const App: React.FC = () => {
     };
 
     try {
-        // Pass undefined for sourceLimit, and forceResync as 4th argument
         const result = await apiService.syncDataSource(clientId, onProgress, undefined, forceResync);
         handleUpdateClientState(result.client);
     } catch (error) {
@@ -275,11 +247,9 @@ const App: React.FC = () => {
         console.error("Manual sync failed:", errorMessage);
         alert(`Failed to sync data source: ${errorMessage}`);
         
-        // This fixes the "stuck pending" UI state on a sync failure.
         setClients(prevClients => 
             prevClients.map(c => {
                 if (c.id === clientId) {
-                    // Mark all non-completed files as failed.
                     const updatedFiles = c.synced_files.map(f => {
                         if (f.status === 'SYNCING' || f.status === 'INDEXING') {
                              return { ...f, status: 'FAILED' as const, status_message: `Sync failed: ${errorMessage}` };
@@ -308,7 +278,7 @@ const App: React.FC = () => {
 
   const handleSearch = useCallback(async (
     query: string, 
-    source: 'ALL' | 'GOOGLE_DRIVE' | 'AIRTABLE',
+    source: 'ALL' | 'GOOGLE_DRIVE',
     image?: { data: string; mimeType: string }
   ) => {
     if (!selectedClient) return "No client selected.";
@@ -353,7 +323,6 @@ const App: React.FC = () => {
             settings={settings}
             onSave={handleSaveSettings}
             onOpenGoogleAuthModal={() => setIsGoogleAuthModalOpen(true)}
-            onOpenAirtableAuthModal={() => setIsAirtableAuthModalOpen(true)}
           />
           <ClientManager 
             clients={clients} 
@@ -365,13 +334,9 @@ const App: React.FC = () => {
             <FileManager 
               client={selectedClient}
               isGoogleDriveConnected={!!settings.is_google_drive_connected}
-              isAirtableSetUp={!!settings.is_airtable_connected}
               onSetFolderUrl={handleSetFolderUrl}
-              onSetAirtableDetails={handleSetAirtableDetails}
-              onInitiateAirtableOAuth={handleInitiateAirtableOAuth}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
-              onSetSyncInterval={handleSetSyncInterval}
               onSyncNow={handleSyncNow}
               onSyncFile={handleSyncFile}
               isSyncing={isSyncingClient === selectedClient.id}
@@ -382,8 +347,33 @@ const App: React.FC = () => {
         <section className="w-full md:w-2/3 lg:w-3/4 flex flex-col gap-6">
             {selectedClient ? (
               <>
-                <SearchInterface client={selectedClient} onSearch={handleSearch} />
-                <ApiDetails client={selectedClient} />
+                <div className="flex items-center gap-4 bg-gray-800 p-2 rounded-lg border border-gray-700">
+                    <button 
+                        onClick={() => setActiveTab('search')}
+                        className={`flex-1 py-2 px-4 rounded-md font-semibold transition-colors ${activeTab === 'search' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                    >
+                        Search & Query
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('edit')}
+                        className={`flex-1 py-2 px-4 rounded-md font-semibold transition-colors ${activeTab === 'edit' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                    >
+                        Smart Data Editor
+                    </button>
+                </div>
+
+                {activeTab === 'search' ? (
+                     <>
+                        <SearchInterface client={selectedClient} onSearch={handleSearch} />
+                        <ApiDetails client={selectedClient} />
+                     </>
+                ) : (
+                    <DataEditor 
+                        client={selectedClient} 
+                        fileSearchApiKey={settings?.file_search_service_api_key || ''} 
+                        onSyncNow={async (id) => await handleSyncNow(id, true)} 
+                    />
+                )}
               </>
             ) : (
                 <div className="bg-gray-800 rounded-lg p-8 h-full flex flex-col items-center justify-center text-center border border-gray-700">
@@ -396,7 +386,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.1.0 (Supabase Edition)</p>
+        <p>v1.4.0 (Smart Editor & Telegram Integration)</p>
       </footer>
 
       {isGoogleAuthModalOpen && settings && (
@@ -405,13 +395,6 @@ const App: React.FC = () => {
             initialSettings={settings}
             onConnect={handleConnectGoogleDrive}
             isConnected={!!settings.is_google_drive_connected}
-        />
-      )}
-      {isAirtableAuthModalOpen && settings && (
-        <AirtableAuthModal 
-            onClose={() => setIsAirtableAuthModalOpen(false)}
-            initialSettings={settings}
-            onSave={handleSaveAirtableSettings}
         />
       )}
     </div>
