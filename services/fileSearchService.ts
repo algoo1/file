@@ -197,7 +197,7 @@ export const fileSearchService = {
         }
 
         // Send message and wait for model response (text or tool call)
-        let response = await chat.sendMessage(messageParts);
+        let response = await chat.sendMessage({ message: messageParts });
         
         // Handle Function Calls (Agentic Loop)
         // We handle a single turn of tool use (Request -> Execute -> Response -> Final Answer)
@@ -232,12 +232,14 @@ export const fileSearchService = {
             }
 
             // Send the tool output back to Gemini
-            response = await chat.sendMessage([{
-                functionResponse: {
-                    name: 'search_knowledge_base',
-                    response: { result: toolResultContent }
-                }
-            }]);
+            response = await chat.sendMessage({
+                message: [{
+                    functionResponse: {
+                        name: 'search_knowledge_base',
+                        response: { result: toolResultContent }
+                    }
+                }]
+            });
         }
 
         return response.text || "No response generated.";

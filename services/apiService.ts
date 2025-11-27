@@ -4,8 +4,9 @@ import { googleDriveService } from './googleDriveService.ts';
 import { fileSearchService } from './fileSearchService.ts';
 import { SystemSettings, Client, FileObject, SyncedFile, Tag } from '../types.ts';
 
-// This service is the main public API for the UI.
-// It orchestrates calls to the other services (database, google, file search).
+// Constant for the 48-hour mandatory update rule
+const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 Hours in milliseconds
+
 export const apiService = {
   getInitialData: async () => {
     const [clients, settings] = await Promise.all([
@@ -48,12 +49,10 @@ export const apiService = {
 
   /**
    * Performs a Smart Sync.
-   * Checks modification times and only processes (fetch content + AI summary) files that have changed or are new.
-   * Unchanged files are re-indexed using the data already in the database.
-   * Missing files are deleted from the database.
-   * 
-   * @param limitSource Optional. If provided, checks only this source (Only 'GOOGLE_DRIVE' supported now).
-   * @param forceFullResync Optional. If true, ignores modification times and re-processes all files with AI.
+   * Logic Updates:
+   * 1. Detects new or modified files.
+   * 2. Re-adds files if they exist on Drive but are missing/deleted locally.
+   * 3. Forces re-processing if a file hasn't been synced in > 48 hours (Stale Check).
    */
   syncDataSource: async (
     clientId: string, 
@@ -67,56 +66,53 @@ export const apiService = {
     if (!client) throw new Error("Client not found.");
     if (!settings.file_search_service_api_key) throw new Error("File Search Service API Key is not set.");
 
-    // Check configuration
     const isDriveConfigured = !!client.google_drive_folder_url && settings.is_google_drive_connected;
-
     if (!isDriveConfigured) {
        throw new Error("Google Drive is not configured for this client.");
     }
     
-    // 1. Fetch Metadata from Sources
+    // 1. Fetch Fresh Metadata from Google Drive
     let allSourceFilesMeta: (Omit<FileObject, 'content' | 'summary' | 'status' | 'statusMessage'>)[] = [];
 
-    if (isDriveConfigured) {
-        try {
-            const driveFilesMeta = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
-            const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-                if (mimeType.includes('spreadsheet')) return 'sheet';
-                if (mimeType.startsWith('image/')) return 'image';
-                return 'pdf'; 
-            };
-            allSourceFilesMeta.push(...driveFilesMeta.map(f => ({ 
-                id: f.id, 
-                name: f.name, 
-                mimeType: f.mimeType, 
-                type: getFileType(f.mimeType), 
-                source: 'GOOGLE_DRIVE' as const,
-                source_modified_at: f.modifiedTime,
-            })));
-        } catch (e) {
-            console.error("Error listing drive files:", e);
-            throw e; // Propagate error for UI feedback
-        }
+    try {
+        const driveFilesMeta = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
+        
+        const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
+            if (mimeType.includes('spreadsheet')) return 'sheet';
+            if (mimeType.startsWith('image/')) return 'image';
+            return 'pdf'; 
+        };
+        
+        allSourceFilesMeta.push(...driveFilesMeta.map(f => ({ 
+            id: f.id, 
+            name: f.name, 
+            mimeType: f.mimeType, 
+            type: getFileType(f.mimeType), 
+            source: 'GOOGLE_DRIVE' as const,
+            source_modified_at: f.modifiedTime,
+        })));
+    } catch (e) {
+        console.error("Error listing drive files:", e);
+        throw e;
     }
 
-    // 2. Determine Work to be Done (Smart Diff)
-    // Because the index is in-memory, we must clear it and rebuild it every time we "Sync" or reload.
+    // 2. Clear Local Search Index (Rebuilt from DB + Updates)
     await fileSearchService.clearIndexForClient(clientId);
     
-    // Get existing files.
+    // Map existing local files
     const relevantExistingFiles = client.synced_files;
-    
     const existingFilesMap = new Map(relevantExistingFiles.map(f => [f.source_item_id, f]));
     const sourceIds = new Set(allSourceFilesMeta.map(f => f.id));
     
-    // 2a. Detect Deletions (Files no longer in source)
+    // 3. Handle Deletions: Remove LOCAL records only if they don't exist in Source anymore
+    // Note: We NEVER delete from Google Drive.
     const filesToDelete = relevantExistingFiles.filter(f => !sourceIds.has(f.source_item_id));
     if (filesToDelete.length > 0) {
         await databaseService.deleteClientFiles(filesToDelete.map(f => f.id));
-        console.log(`Deleted ${filesToDelete.length} files that are no longer in source.`);
+        console.log(`Removed ${filesToDelete.length} obsolete files from local index (Source files missing).`);
     }
 
-    // 2b. Detect New and Modified Files
+    // 4. Determine Work: Detect New, Modified, or Stale (>48h) Files
     const filesToProcess: typeof allSourceFilesMeta = [];
     const unchangedFiles: SyncedFile[] = [];
     const initialListPayload: Partial<SyncedFile>[] = [];
@@ -125,90 +121,85 @@ export const apiService = {
     for (const sourceFile of allSourceFilesMeta) {
         const existing = existingFilesMap.get(sourceFile.id);
         
-        let isModified = false;
+        let shouldProcess = false;
+        let reason = '';
+        
         const isNew = !existing;
         
-        if (existing) {
+        if (isNew) {
+            shouldProcess = true;
+            reason = 'New file detected.';
+        } else if (existing) {
+            // A. Manual Force Sync
             if (forceFullResync) {
-                isModified = true;
+                shouldProcess = true;
+                reason = 'Forced re-processing.';
             }
-            // If previous sync failed, try again
+            // B. Failed Previous Sync
             else if (existing.status === 'FAILED') {
-                isModified = true;
+                shouldProcess = true;
+                reason = 'Retrying failed file.';
             } 
-            // Check timestamp
+            // C. Source Modification Timestamp Mismatch
             else if (sourceFile.source_modified_at && existing.source_modified_at) {
-                // If timestamp strings differ, update. 
-                if (sourceFile.source_modified_at !== existing.source_modified_at) {
-                    const newTime = new Date(sourceFile.source_modified_at).getTime();
-                    const oldTime = new Date(existing.source_modified_at).getTime();
-                    if (!isNaN(newTime) && !isNaN(oldTime)) {
-                         // 1 second tolerance
-                        if (Math.abs(newTime - oldTime) > 1000) isModified = true;
-                    } else {
-                        isModified = true;
-                    }
+                const newTime = new Date(sourceFile.source_modified_at).getTime();
+                const oldTime = new Date(existing.source_modified_at).getTime();
+                if (!isNaN(newTime) && !isNaN(oldTime) && Math.abs(newTime - oldTime) > 1000) {
+                    shouldProcess = true;
+                    reason = 'Content modified on Drive.';
                 }
             } 
-            // Fallback if no timestamp existed before
-            else if (!existing.source_modified_at) {
-                isModified = true;
+            // D. Stale Check (48 Hour Rule)
+            // If the file hasn't been synced/indexed by our system in > 48 hours, update it.
+            else if (existing.last_synced_at) {
+                const lastSyncTime = new Date(existing.last_synced_at).getTime();
+                if (Date.now() - lastSyncTime > STALE_THRESHOLD_MS) {
+                    shouldProcess = true;
+                    reason = 'Periodic 48-hour update.';
+                }
             }
-        } else {
-             isModified = true; // New file
         }
 
-        if (isNew || isModified) {
-            // New Logic: "This file will be deleted from the data ... uploaded again with modifications"
-            // If modified, queue it for deletion so we get a clean slate (fresh insert, fresh index).
-            if (isModified && existing) {
+        if (shouldProcess) {
+            // If it exists but we need to re-process, mark old record for deletion to ensure fresh index
+            if (existing) {
                 modifiedFileIdsToDelete.push(existing.id);
             }
 
             filesToProcess.push(sourceFile);
             
-            // Generate a descriptive status message
-            let statusMsg = 'Pending sync...';
-            if (forceFullResync && !isNew) statusMsg = 'Forced re-processing...';
-            else if (isNew) statusMsg = 'New file detected.';
-            else if (isModified) {
-                statusMsg = `Content modified. Cleaning old data and re-importing...`;
-            }
-
             initialListPayload.push({
                 source_item_id: sourceFile.id,
                 name: sourceFile.name,
-                status: 'SYNCING', // Always Syncing since we are re-processing
+                status: 'SYNCING', 
                 type: sourceFile.type,
                 source: sourceFile.source,
                 source_modified_at: sourceFile.source_modified_at,
-                // If we are deleting the old record, do not pass the old ID.
-                id: (isModified && existing) ? undefined : existing?.id, 
-                status_message: statusMsg
+                // Pass undefined ID to indicate this will be a new insert (after old one is deleted)
+                id: (existing) ? undefined : existing?.id, 
+                status_message: reason
             });
         } else {
-            // Unchanged: Keep existing data and prepare to restore index
+            // Unchanged and Fresh: Just restore to search index
             unchangedFiles.push(existing!);
             initialListPayload.push(existing!);
         }
     }
 
-    // Execute deletion of modified files to ensure "Delete then Upload" behavior
+    // Clear out old versions of modified/stale files from DB
     if (modifiedFileIdsToDelete.length > 0) {
         await databaseService.deleteClientFiles(modifiedFileIdsToDelete);
-        console.log(`Deleted ${modifiedFileIdsToDelete.length} modified files from database to ensure fresh sync.`);
     }
 
-    // Notify UI about the state of files before we start processing
+    // Notify UI
     onProgress({ type: 'INITIAL_LIST', files: initialListPayload });
 
-    // 3. Restore Index for Unchanged Files
-    // This avoids expensive Gemini calls for files we already summarized.
+    // 5. Restore Index for Unchanged Files
     for (const file of unchangedFiles) {
         await fileSearchService.restoreIndex(client.id, file);
     }
 
-    // 4. Process Changed/New Files (Fetch -> Gemini -> Index)
+    // 6. Process New/Modified/Stale Files
     const batchSize = 5;
     const finalUpdates: Partial<SyncedFile>[] = [];
 
@@ -217,23 +208,20 @@ export const apiService = {
 
         const processedBatch = await Promise.all(batch.map(async (fileMeta) => {
             let finalFileObject: FileObject;
-            // Since we deleted modified files, we treat everything here as a new insert (id=undefined).
             
             try {
-                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Fetching content...' }});
+                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Downloading content...' }});
                 
                 let content = '';
                 if (fileMeta.source === 'GOOGLE_DRIVE') {
                     content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
                 }
 
-                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Processing with AI...' }});
+                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing & Indexing...' }});
                 
                 const fileData = { ...fileMeta, content };
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
-                
-                // Add success message
-                finalFileObject.statusMessage = 'File synced successfully.';
+                finalFileObject.statusMessage = 'Successfully synced.';
 
             } catch (error) {
                  console.error(`Error processing ${fileMeta.name}:`, error);
@@ -249,7 +237,7 @@ export const apiService = {
             const updatePayload = {
                 ...finalFileObject,
                 last_synced_at: new Date().toISOString(),
-                id: undefined, // Always undefined to force INSERT
+                id: undefined, // Force INSERT
                 client_id: clientId
             };
 
@@ -268,44 +256,34 @@ export const apiService = {
              summary: f.summary,
              last_synced_at: new Date().toISOString(),
              source_modified_at: f.source_modified_at,
-             id: undefined // Force INSERT
+             id: undefined
         })));
     }
 
-    // 5. Update Database (Upsert/Insert)
     if (finalUpdates.length > 0) {
         await databaseService.updateClientFiles(clientId, finalUpdates);
     }
     
-    // 6. Return updated client
     const updatedClient = await databaseService.getClientById(clientId);
     if (!updatedClient) throw new Error("Failed to reload client after sync.");
 
     return { client: updatedClient };
   },
 
-  /**
-   * Syncs a single file manually.
-   * Forces a re-download and re-summarization regardless of timestamps.
-   */
-  syncSingleFile: async (
-    clientId: string,
-    file: SyncedFile
-  ): Promise<{ client: Client }> => {
+  syncSingleFile: async (clientId: string, file: SyncedFile): Promise<{ client: Client }> => {
       const settings = await databaseService.getSettings();
       let client = await databaseService.getClientById(clientId);
       if (!client || !settings.file_search_service_api_key) throw new Error("Configuration error.");
 
-      // CLEAN SLATE: Delete the existing file first.
+      // Manual sync forces re-download and re-index.
       await databaseService.deleteClientFiles([file.id]);
 
       try {
           let content = '';
-          // We need fresh metadata (like modified time) first
           let updatedMeta = { 
               name: file.name, 
               source_modified_at: file.source_modified_at || new Date().toISOString(),
-              mimeType: file.type === 'image' ? 'image/jpeg' : 'application/pdf' // Default fallback
+              mimeType: file.type === 'image' ? 'image/jpeg' : 'application/pdf'
           };
 
           if (file.source === 'GOOGLE_DRIVE') {
@@ -320,7 +298,6 @@ export const apiService = {
                     };
                     content = await googleDriveService.getFileContent(file.source_item_id, currentMeta.mimeType);
                 } else {
-                    // Drive file missing from list. Since we deleted it from DB, we just stop here.
                      console.log("File not found on drive, identifying as deleted.");
                      const updatedClient = await databaseService.getClientById(clientId);
                      return { client: updatedClient! };
@@ -343,7 +320,6 @@ export const apiService = {
           const processed = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
 
           const updatePayload: Partial<SyncedFile> = {
-              // No ID provided, so it inserts a new record
               client_id: clientId,
               source_item_id: file.source_item_id,
               name: processed.name,
@@ -360,7 +336,6 @@ export const apiService = {
 
       } catch (error) {
           console.error("Single sync failed:", error);
-          // Re-insert an error record since we deleted the original
           await databaseService.updateClientFiles(clientId, [{
               client_id: clientId,
               source_item_id: file.source_item_id,
@@ -375,19 +350,4 @@ export const apiService = {
       const updatedClient = await databaseService.getClientById(clientId);
       return { client: updatedClient! };
   }
-};
-
-// Helper to format date consistent with UI
-const formatDate = (isoString?: string) => {
-    if (!isoString) return '-';
-    try {
-        return new Date(isoString).toLocaleString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    } catch (e) {
-        return isoString;
-    }
 };

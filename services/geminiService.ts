@@ -35,7 +35,7 @@ export async function summarizeSingleContent(
     return { summary: '', error: 'Could not process: File is empty or content could not be read.' };
   }
 
-  const { GoogleGenAI } = await import("@google/genai");
+  // Use the top-level imported class
   const ai = new GoogleGenAI({ apiKey });
   
   let contents: any;

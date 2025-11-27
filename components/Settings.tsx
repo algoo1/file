@@ -1,19 +1,23 @@
+
 import React, { useState, useEffect } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
 import { CheckIcon } from './icons/CheckIcon.tsx';
+import { AirtableIcon } from './icons/AirtableIcon.tsx';
 import { SystemSettings } from '../types.ts';
 
 interface SettingsProps {
   settings: SystemSettings | null;
   onSave: (settings: Partial<SystemSettings>) => Promise<any>;
   onOpenGoogleAuthModal: () => void;
+  onOpenAirtableModal: () => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
   settings,
   onSave,
   onOpenGoogleAuthModal,
+  onOpenAirtableModal
 }) => {
   const [localApiKey, setLocalApiKey] = useState(settings?.file_search_service_api_key || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -89,6 +93,18 @@ const Settings: React.FC<SettingsProps> = ({
                 >
                     <DriveIcon className="w-5 h-5" />
                     {settings?.is_google_drive_connected ? 'Google Drive Connected' : 'Setup Google Drive Integration'}
+                </button>
+                
+                <button
+                    onClick={onOpenAirtableModal}
+                    className={`w-full flex items-center justify-center gap-2 font-semibold py-2 px-4 rounded-md transition-colors ${
+                        settings?.airtable_client_id 
+                        ? 'bg-yellow-600/80 text-white' 
+                        : 'bg-gray-700 hover:bg-gray-600 text-white'
+                    }`}
+                >
+                    <AirtableIcon className="w-5 h-5" />
+                    {settings?.airtable_client_id ? 'Airtable Configured' : 'Setup Airtable Integration'}
                 </button>
             </div>
         </div>

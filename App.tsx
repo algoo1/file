@@ -11,6 +11,7 @@ import DataEditor from './components/DataEditor.tsx';
 import ApiDetails from './components/ApiDetails.tsx';
 import Settings from './components/Settings.tsx';
 import GoogleAuthModal from './components/GoogleAuthModal.tsx';
+import AirtableAuthModal from './components/AirtableAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
 import { XCircleIcon } from './components/icons/XCircleIcon.tsx';
 
@@ -21,6 +22,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState(false);
+  const [isAirtableModalOpen, setIsAirtableModalOpen] = useState(false);
   
   // New state for switching views
   const [activeTab, setActiveTab] = useState<'search' | 'edit'>('search');
@@ -84,13 +86,7 @@ const App: React.FC = () => {
       }
 
       console.log(`[Auto-Sync] Checking for modifications for client: ${selectedClient.name}...`);
-      
-      // Do not set global isSyncingClient here for background auto-syncs to avoid locking the UI constantly.
-      // We only lock for manual "Sync Now" actions. 
-      // However, we need a local lock for this effect.
-      // Actually, since we want to show feedback (uploading/deleting), let's use a lightweight progress callback.
 
-      // We define a lightweight progress handler just to update state, not to block UI interaction
       const onProgress = (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => {
            setClients(prevClients => 
               prevClients.map(c => {
@@ -136,7 +132,7 @@ const App: React.FC = () => {
     // Set interval for 10 seconds
     const intervalId = setInterval(syncClientData, 10000);
     return () => clearInterval(intervalId);
-  }, [selectedClient?.id, selectedClient?.google_drive_folder_url]); // Dependencies strictly on ID and URL
+  }, [selectedClient?.id, selectedClient?.google_drive_folder_url]); 
 
 
   const handleSaveSettings = useCallback(async (newSettings: Partial<SystemSettings>) => {
@@ -167,6 +163,18 @@ const App: React.FC = () => {
       console.error("Google Drive connection failed:", error);
       alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
+    }
+  }, [handleSaveSettings]);
+
+  const handleConnectAirtable = useCallback(async (creds: { clientId: string }) => {
+    try {
+        await handleSaveSettings({
+            airtable_client_id: creds.clientId
+        });
+        setIsAirtableModalOpen(false);
+    } catch (error) {
+        console.error("Airtable settings save failed:", error);
+        alert("Failed to save Airtable settings.");
     }
   }, [handleSaveSettings]);
 
@@ -323,6 +331,7 @@ const App: React.FC = () => {
             settings={settings}
             onSave={handleSaveSettings}
             onOpenGoogleAuthModal={() => setIsGoogleAuthModalOpen(true)}
+            onOpenAirtableModal={() => setIsAirtableModalOpen(true)}
           />
           <ClientManager 
             clients={clients} 
@@ -395,6 +404,14 @@ const App: React.FC = () => {
             initialSettings={settings}
             onConnect={handleConnectGoogleDrive}
             isConnected={!!settings.is_google_drive_connected}
+        />
+      )}
+      
+      {isAirtableModalOpen && settings && (
+        <AirtableAuthModal
+            onClose={() => setIsAirtableModalOpen(false)}
+            initialSettings={settings}
+            onSave={handleConnectAirtable}
         />
       )}
     </div>

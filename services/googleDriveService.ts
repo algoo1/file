@@ -2,10 +2,20 @@
 import { FileObject } from '../types.ts';
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/drive.file'; // Scopes updated to allow writing
+// Added drive.readonly and drive.metadata.readonly to ensure we can list files in folders provided by URL
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly'; 
 
 let tokenClient: any = null;
 let gapiClientInitialized = false;
+let isInitializing = false;
+
+// Store credentials for lazy/retry initialization
+let storedApiKey: string | null = null;
+let storedClientId: string | null = null;
+
+// Token Management State
+let cachedAccessToken: string | null = null;
+let tokenExpiryTime: number = 0; // Timestamp in ms
 
 /**
  * Helper to wait for global objects from Google's scripts to be ready.
@@ -13,7 +23,7 @@ let gapiClientInitialized = false;
  * @param timeout Milliseconds to wait before failing.
  * @returns A promise that resolves with the global object.
  */
-function waitForGlobal<T>(name: 'gapi' | 'google', timeout = 8000): Promise<T> {
+function waitForGlobal<T>(name: 'gapi' | 'google', timeout = 15000): Promise<T> {
     return new Promise((resolve, reject) => {
         const startTime = Date.now();
         const check = () => {
@@ -22,7 +32,7 @@ function waitForGlobal<T>(name: 'gapi' | 'google', timeout = 8000): Promise<T> {
             } else if (Date.now() - startTime > timeout) {
                 reject(new Error(`Failed to load Google script for '${name}' within ${timeout}ms. Check your internet connection and ad-blockers.`));
             } else {
-                setTimeout(check, 100);
+                setTimeout(check, 200);
             }
         };
         check();
@@ -31,8 +41,6 @@ function waitForGlobal<T>(name: 'gapi' | 'google', timeout = 8000): Promise<T> {
 
 /**
  * Reads a Blob and converts it to a base64 encoded string.
- * @param blob The blob to convert.
- * @returns A promise that resolves with the base64 string (without the data: prefix).
  */
 const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -48,40 +56,71 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 /**
+ * Stores the token and its expiration time.
+ */
+const handleTokenResponse = (tokenResponse: any) => {
+    if (tokenResponse && tokenResponse.access_token) {
+        cachedAccessToken = tokenResponse.access_token;
+        // Calculate expiry time. expires_in is in seconds. 
+        // We subtract 5 minutes (300000ms) to create a safety buffer for silent refresh.
+        const expiresInMs = (tokenResponse.expires_in || 3599) * 1000;
+        tokenExpiryTime = Date.now() + expiresInMs - 300000; 
+        
+        // Also set it in gapi for client library usage
+        const gapi = window.gapi as any;
+        if (gapi && gapi.client) {
+            gapi.client.setToken(tokenResponse);
+        }
+        console.log(`Google Access Token refreshed. Valid for ~${Math.round((expiresInMs - 300000)/60000)} minutes.`);
+    }
+};
+
+/**
  * Internal helper to ensure we have a valid access token.
- * If missing, it attempts to request one using the tokenClient.
+ * intelligently handles silent refreshes to avoid popups.
  */
 const ensureAccessToken = async (): Promise<void> => {
-    const gapi = window.gapi as any;
+    // Lazy Initialization Check
     if (!gapiClientInitialized) {
-        throw new Error("GAPI client not initialized.");
+        if (storedApiKey && storedClientId) {
+            console.log("GAPI not initialized, attempting lazy initialization...");
+            await googleDriveService.init(storedApiKey, storedClientId);
+        } else {
+             throw new Error("Google Drive Service not initialized. Please refresh or reconnect.");
+        }
     }
-
-    // If we already have a token, we are good.
-    if (gapi.client.getToken()) {
-        return;
-    }
-
-    console.log("Google access token missing. Attempting to refresh...");
 
     if (!tokenClient) {
-        throw new Error("Google Token Client not initialized. Please refresh the page.");
+         throw new Error("Google Token Client not ready. Please refresh.");
     }
+
+    // 1. Check if the cached token is still valid
+    if (cachedAccessToken && Date.now() < tokenExpiryTime) {
+        // Token is valid, check if GAPI has it set
+        const gapi = window.gapi as any;
+        if (gapi.client.getToken()) {
+            return; // All good, proceed without network call
+        }
+    }
+
+    console.log("Google access token expired or missing. Attempting silent refresh...");
 
     return new Promise((resolve, reject) => {
         try {
-            // Temporarily override the callback to handle this specific request
+            // Override callback for this specific request
             tokenClient.callback = (resp: any) => {
                 if (resp.error) {
-                    reject(resp);
+                    console.warn("Silent refresh failed:", resp);
+                    // If silent refresh fails (e.g. session expired), we might need to prompt.
+                    reject(new Error(`Silent auth refresh failed: ${JSON.stringify(resp)}`));
                 } else {
-                    console.log("Google access token refreshed successfully.");
+                    handleTokenResponse(resp);
                     resolve();
                 }
             };
             
-            // Request token. prompt: '' tries to do it silently if possible, 
-            // or shows selector if multiple accounts.
+            // Request token silently (prompt: ''). 
+            // This works if the user has an active Google session in the browser.
             tokenClient.requestAccessToken({ prompt: '' });
         } catch (err) {
             reject(err);
@@ -93,13 +132,34 @@ const ensureAccessToken = async (): Promise<void> => {
 export const googleDriveService = {
   /**
    * Silently initializes the GAPI client library without user interaction.
-   * This is crucial for re-initializing the client after a page reload.
+   * Idempotent: Can be called multiple times safely.
    */
   init: async (apiKey: string, clientId: string): Promise<void> => {
+    // Store credentials for lazy retry
+    storedApiKey = apiKey;
+    storedClientId = clientId;
+
     if (gapiClientInitialized) {
         return;
     }
+
+    // Prevent concurrent initializations
+    if (isInitializing) {
+        console.log("GAPI initialization already in progress, waiting...");
+        return new Promise((resolve, reject) => {
+            const checkInit = () => {
+                if (gapiClientInitialized) resolve();
+                else if (!isInitializing) reject(new Error("Concurrent initialization failed."));
+                else setTimeout(checkInit, 100);
+            };
+            checkInit();
+        });
+    }
+
+    isInitializing = true;
+
     try {
+        console.log("Starting GAPI initialization...");
         const gapi = await waitForGlobal<any>('gapi');
         const google = await waitForGlobal<any>('google');
 
@@ -107,7 +167,7 @@ export const googleDriveService = {
             gapi.load('client', {
                 callback: resolve,
                 onerror: reject,
-                timeout: 5000,
+                timeout: 10000, // 10s timeout for load
                 ontimeout: () => reject(new Error('GAPI client library load timed out.'))
             });
         });
@@ -120,30 +180,39 @@ export const googleDriveService = {
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: clientId,
             scope: SCOPES,
-            callback: () => {}, // Callback is handled by the interactive connect() method
+            callback: (resp: any) => handleTokenResponse(resp),
         });
 
         gapiClientInitialized = true;
-        console.log("GAPI client silently initialized.");
+        console.log("GAPI client initialized successfully.");
+        
+        // Attempt an immediate silent connection check to preload token
+        try {
+            tokenClient.requestAccessToken({ prompt: '' });
+        } catch (e) {
+            // Ignore initial silent fail
+        }
+
     } catch (err) {
         gapiClientInitialized = false;
-        console.error("Failed to silently initialize GAPI client:", err);
+        console.error("Failed to initialize GAPI client:", err);
         throw err;
+    } finally {
+        isInitializing = false;
     }
   },
   
   /**
-   * Initializes the GAPI client and authenticates the user with Google using a robust sequential flow.
+   * Initializes the GAPI client and authenticates the user with Google.
+   * Used for the initial explicit "Connect" button click.
    */
   connect: async (apiKey: string, clientId: string): Promise<void> => {
     try {
-      // Ensure the client is initialized first
       await googleDriveService.init(apiKey, clientId);
       
       const gapi = window.gapi as any;
 
-      // Use GSI for authentication (token flow) and get the token.
-      const tokenResponse = await new Promise<any>((resolve, reject) => {
+      await new Promise<any>((resolve, reject) => {
         try {
             if (!tokenClient) throw new Error("GSI token client not initialized.");
             
@@ -152,109 +221,65 @@ export const googleDriveService = {
                     return reject(response);
                 }
                 if (!response.access_token) {
-                     return reject(new Error("Authentication failed: No access token was received from Google. The user may have cancelled the sign-in."));
+                     return reject(new Error("Authentication failed: No access token received."));
                 }
-                console.log("Successfully authenticated and received access token.");
+                handleTokenResponse(response);
                 resolve(response);
             };
 
             tokenClient.error_callback = (error: any) => {
-                const friendlyMessage = `Authentication failed.\n\n` +
-                  `Error from Google: "${error.type || 'Unknown error'}"\n\n` +
-                  `Please check your Google Cloud project setup:\n` +
-                  `1. Is the OAuth Client ID correct?\n` +
-                  `2. Have you added your current URL (${window.location.origin}) to the 'Authorized JavaScript origins' for that Client ID?`;
-                reject(new Error(friendlyMessage));
+                reject(new Error(`Google Auth Error: ${error.type}`));
             };
 
+            // Force consent only on explicit connect to ensure permissions are granted
             tokenClient.requestAccessToken({ prompt: 'consent' });
         } catch(err) {
             reject(err);
         }
       });
       
-      // Set the access token for the GAPI client.
-      gapi.client.setToken({ access_token: tokenResponse.access_token });
-      
     } catch (err: any) {
         console.error("Google Drive connection process failed:", err);
-        // Consolidate error messages for better debugging.
-        if (err.details || err.result?.error?.message) {
-             let details = err.details || (err.result?.error?.message) || "An unknown error occurred.";
-             const friendlyMessage = `Failed to initialize Google Drive client.\n\n` +
-                `Error from Google: "${details}"\n\n` +
-                `Please check your Google Cloud project setup:\n` +
-                `1. Is the Google Drive API enabled?\n` +
-                `2. Is the API Key correct and unrestricted, or does it allow your current URL (${window.location.origin}) as an HTTP referrer?`;
-            throw new Error(friendlyMessage);
-        }
-        throw err;
+        const errorMsg = err.details || (err.result?.error?.message) || JSON.stringify(err);
+        throw new Error(`Failed to connect: ${errorMsg}`);
     }
   },
 
-  /**
-   * Extracts folder ID from a Google Drive URL.
-   */
   getFolderIdFromUrl: (url: string): string | null => {
       const match = url.match(/folders\/([a-zA-Z0-9_-]+)/);
-      if (match && match[1]) {
-        return match[1];
-      }
-      // Also support URLs without /folders/ in the path, like when viewing the folder content
+      if (match && match[1]) return match[1];
       const urlMatch = url.match(/drive\/[a-z]+\/([a-zA-Z0-9_-]+)/);
       return urlMatch ? urlMatch[1] : null;
   },
 
-  /**
-   * Fetches a list of file metadata from a Google Drive folder.
-   * @param folderUrl The URL of the Google Drive folder.
-   * @returns A promise that resolves to an array of file metadata objects.
-   */
   getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string; modifiedTime: string }[]> => {
     const gapi = window.gapi as any;
     
-    // Try to restore token if missing
+    // Check token before call (will trigger lazy init if needed)
     await ensureAccessToken();
-
-    if (!gapi.client.getToken()) {
-         // Should be caught by ensureAccessToken, but double check
-        throw new Error("Google session expired or user is not signed in. Please reconnect to Google Drive.");
-    }
 
     const folderId = googleDriveService.getFolderIdFromUrl(folderUrl);
     if (!folderId) {
-        throw new Error("Invalid Google Drive folder URL. Please use a valid URL like 'https://drive.google.com/drive/folders/...'");
+        throw new Error("Invalid Google Drive folder URL.");
     }
-
-    console.log(`Fetching file list from Google Drive folder ID: ${folderId}`);
     
-    const response = await gapi.client.drive.files.list({
-      q: `'${folderId}' in parents and trashed = false and (mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp')`,
-      fields: 'files(id, name, mimeType, modifiedTime)',
-      pageSize: 500 // Fetch up to 500 files
-    });
-
-    const files = response.result.files;
-    return files || [];
+    try {
+        const response = await gapi.client.drive.files.list({
+          q: `'${folderId}' in parents and trashed = false and (mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp')`,
+          fields: 'files(id, name, mimeType, modifiedTime)',
+          pageSize: 500
+        });
+        return response.result.files || [];
+    } catch (error: any) {
+        const msg = error.result?.error?.message || error.message || JSON.stringify(error);
+        throw new Error(`Failed to list files: ${msg}`);
+    }
   },
 
-  /**
-   * Fetches the content for a single file from Google Drive.
-   * For images, returns a base64 string. For others, returns plain text.
-   * @param fileId The ID of the file.
-   * @param mimeType The MIME type of the file.
-   * @returns A promise that resolves to the string content of the file.
-   */
   getFileContent: async (fileId: string, mimeType: string): Promise<string> => {
     const gapi = window.gapi as any;
-    
-    // Try to restore token if missing
     await ensureAccessToken();
-    
     const token = gapi?.client?.getToken();
-    if (!token?.access_token) {
-        throw new Error("User not authenticated or token has expired. Please reconnect to Google Drive.");
-    }
     
     try {
         if (mimeType === 'application/vnd.google-apps.spreadsheet') {
@@ -267,53 +292,38 @@ export const googleDriveService = {
             return exportResponse.body;
         }
 
-        // For binary files (PDFs, images), use fetch for better handling
         const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
             headers: { 'Authorization': `Bearer ${token.access_token}` }
         });
 
         if (!response.ok) {
              const errorData = await response.json();
-             throw new Error(`Google API error: ${errorData.error.message} (Code: ${response.status})`);
+             throw new Error(`Google API error: ${errorData.error.message}`);
         }
 
         if (mimeType.startsWith('image/')) {
             const blob = await response.blob();
             return blobToBase64(blob);
         }
-
-        // For PDFs and other potential text-based files downloaded directly
         return await response.text();
 
     } catch (err: any) {
+        const msg = err.result?.error?.message || err.message || JSON.stringify(err);
         console.error(`Failed to fetch content for file ID ${fileId}:`, err);
-        if (err.message.includes("Code: 403")) {
-            throw new Error(`Permission denied for file. Ensure the connected account has at least 'Viewer' access.`);
-        }
-        throw new Error(`Failed to download file content. Error: ${err.result?.error?.message || err.message}`);
+        throw new Error(`Failed to download file content: ${msg}`);
     }
   },
 
   /**
-   * Updates the content of a file on Google Drive (overwrites it).
-   * Note: This strictly handles text-based updates (CSV, TXT) converted to media upload.
-   * @param fileId The ID of the file to update.
-   * @param newContent The new string content.
-   * @param mimeType The MIME type (e.g., 'text/csv').
+   * Updates file content using multipart upload.
+   * NOTE: This allows modifying files (e.g. changing prices), but does NOT delete files from Drive.
    */
   updateFileContent: async (fileId: string, newContent: string, mimeType: string): Promise<void> => {
       const gapi = window.gapi as any;
       await ensureAccessToken();
       const token = gapi?.client?.getToken();
 
-      // For Google Sheets, we cannot just PUT text/csv. We must update via upload API using multipart.
-      // However, GAPI client doesn't support multipart easily. We use fetch.
-      
-      const metadata = {
-          mimeType: mimeType, // This might need to be 'application/vnd.google-apps.spreadsheet' if we want it to stay a sheet
-      };
-
-      // Construct a multipart request body.
+      const metadata = { mimeType: mimeType };
       const boundary = 'foo_bar_baz';
       const delimiter = "\r\n--" + boundary + "\r\n";
       const close_delim = "\r\n--" + boundary + "--";
