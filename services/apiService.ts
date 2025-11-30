@@ -8,6 +8,9 @@ import { SystemSettings, Client, FileObject, SyncedFile, Tag } from '../types.ts
 const REFRESH_INTERVAL_DAYS = 8;
 const REFRESH_INTERVAL_MS = REFRESH_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
 
+// Helper for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const apiService = {
   getInitialData: async () => {
     const [clients, settings] = await Promise.all([
@@ -215,6 +218,11 @@ export const apiService = {
 
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing content...' }});
                 
+                // Add a proactive delay before calling AI service to respect rate limits
+                // Free Tier Limit: ~15 RPM = 1 request every 4 seconds.
+                // We pause for 4000ms to be safe.
+                await delay(4000); 
+
                 const fileData = { ...fileMeta, content };
                 // Generate AI Summary
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);

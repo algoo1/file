@@ -119,7 +119,8 @@ ${file.content}
   }
   // --- STRATEGY 3: GENERAL DOCUMENTS (PDFs, Text) ---
   else {
-    const MAX_CONTENT_LENGTH = 800000;
+    // Reduced from 800,000 to 300,000 to improve processing speed and reduce timeouts/quota usage
+    const MAX_CONTENT_LENGTH = 300000;
     const truncatedContent = file.content.substring(0, MAX_CONTENT_LENGTH);
     const prompt = `You are an expert data analysis AI. I will provide you with content from a file or document. Your goal is to generate a structured summary for a **multilingual** search index.
 
@@ -145,9 +146,10 @@ ${truncatedContent}
   }
 
 
-  // UPDATED: Increased retries and base backoff to handle free tier rate limits better
-  const MAX_RETRIES = 10;
-  const INITIAL_BACKOFF_MS = 3000;
+  // UPDATED: Reduced retries to avoid long hangs. 
+  // We now rely on apiService's throttle for rate limiting.
+  const MAX_RETRIES = 3;
+  const INITIAL_BACKOFF_MS = 2000;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -173,7 +175,7 @@ ${truncatedContent}
       }
 
       // Default exponential backoff
-      let delay = (INITIAL_BACKOFF_MS * Math.pow(2, attempt)) + (Math.random() * 1000); 
+      let delay = (INITIAL_BACKOFF_MS * Math.pow(2, attempt)); 
       
       // Smart retry for 429 Rate Limit errors
       if (error instanceof Error) {
@@ -181,30 +183,8 @@ ${truncatedContent}
         const isRateLimit = errMessage.includes('429') || errMessage.includes('RESOURCE_EXHAUSTED');
         
         if (isRateLimit) {
-            // Force a higher delay minimum for rate limits
-            if (delay < 10000) {
-                 delay = 15000 + (Math.random() * 5000); // Wait at least 15-20s
-            }
-            
-            try {
-                // Try to extract structured retry info
-                const errorDetails = JSON.parse(errMessage);
-                if (errorDetails.error?.details) {
-                    const retryInfo = errorDetails.error.details.find(
-                    (d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
-                    );
-                    
-                    if (retryInfo?.retryDelay) {
-                        const parsedDelay = parseRetryDelay(retryInfo.retryDelay);
-                        if (parsedDelay) {
-                            delay = parsedDelay + (Math.random() * 1000);
-                            console.log(`Rate limit exceeded. API suggested retrying in ${retryInfo.retryDelay}.`);
-                        }
-                    }
-                }
-            } catch (e) {
-                // Ignore parse errors, stick to the robust delay
-            }
+            // If we hit a rate limit despite the throttle, wait longer.
+             delay = 10000 + (Math.random() * 2000); 
              console.log(`Rate limit (429) hit. Backing off for ${delay.toFixed(0)}ms.`);
         }
       }
