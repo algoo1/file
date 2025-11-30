@@ -53,6 +53,7 @@ export const apiService = {
    * 1. Detects new or modified files.
    * 2. Re-adds files if they exist on Drive but are missing/deleted locally.
    * 3. Forces re-processing if a file hasn't been synced in > 48 hours (Stale Check).
+   * 4. NOW USES UPSERT INSTEAD OF DELETE-THEN-INSERT to prevent UI flickering.
    */
   syncDataSource: async (
     clientId: string, 
@@ -113,10 +114,10 @@ export const apiService = {
     }
 
     // 4. Determine Work: Detect New, Modified, or Stale (>48h) Files
-    const filesToProcess: typeof allSourceFilesMeta = [];
+    // We now attach the existing DB ID to the file meta if available, so we can Update instead of Insert.
+    const filesToProcess: (typeof allSourceFilesMeta[0] & { existingId?: string })[] = [];
     const unchangedFiles: SyncedFile[] = [];
     const initialListPayload: Partial<SyncedFile>[] = [];
-    const modifiedFileIdsToDelete: string[] = [];
 
     for (const sourceFile of allSourceFilesMeta) {
         const existing = existingFilesMap.get(sourceFile.id);
@@ -161,12 +162,7 @@ export const apiService = {
         }
 
         if (shouldProcess) {
-            // If it exists but we need to re-process, mark old record for deletion to ensure fresh index
-            if (existing) {
-                modifiedFileIdsToDelete.push(existing.id);
-            }
-
-            filesToProcess.push(sourceFile);
+            filesToProcess.push({ ...sourceFile, existingId: existing?.id });
             
             initialListPayload.push({
                 source_item_id: sourceFile.id,
@@ -175,8 +171,8 @@ export const apiService = {
                 type: sourceFile.type,
                 source: sourceFile.source,
                 source_modified_at: sourceFile.source_modified_at,
-                // Pass undefined ID to indicate this will be a new insert (after old one is deleted)
-                id: (existing) ? undefined : existing?.id, 
+                // Pass the existing ID so the UI knows it's an update, not a new row.
+                id: existing?.id, 
                 status_message: reason
             });
         } else {
@@ -186,12 +182,7 @@ export const apiService = {
         }
     }
 
-    // Clear out old versions of modified/stale files from DB
-    if (modifiedFileIdsToDelete.length > 0) {
-        await databaseService.deleteClientFiles(modifiedFileIdsToDelete);
-    }
-
-    // Notify UI
+    // Notify UI of initial status (some Syncing, some Idle)
     onProgress({ type: 'INITIAL_LIST', files: initialListPayload });
 
     // 5. Restore Index for Unchanged Files
@@ -234,10 +225,11 @@ export const apiService = {
                  };
             }
             
+            // Prepare payload for DB Upsert
             const updatePayload = {
                 ...finalFileObject,
                 last_synced_at: new Date().toISOString(),
-                id: undefined, // Force INSERT
+                id: fileMeta.existingId, // Use existing ID if we have it (Update), otherwise undefined (Insert)
                 client_id: clientId
             };
 
@@ -256,7 +248,7 @@ export const apiService = {
              summary: f.summary,
              last_synced_at: new Date().toISOString(),
              source_modified_at: f.source_modified_at,
-             id: undefined
+             id: f.id // Pass the uuid so DB knows which row to update
         })));
     }
 
@@ -275,9 +267,8 @@ export const apiService = {
       let client = await databaseService.getClientById(clientId);
       if (!client || !settings.file_search_service_api_key) throw new Error("Configuration error.");
 
-      // Manual sync forces re-download and re-index.
-      await databaseService.deleteClientFiles([file.id]);
-
+      // Manual single file sync - we don't delete, we just update.
+      
       try {
           let content = '';
           let updatedMeta = { 
@@ -320,6 +311,7 @@ export const apiService = {
           const processed = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
 
           const updatePayload: Partial<SyncedFile> = {
+              id: file.id, // Update in place
               client_id: clientId,
               source_item_id: file.source_item_id,
               name: processed.name,
@@ -337,6 +329,7 @@ export const apiService = {
       } catch (error) {
           console.error("Single sync failed:", error);
           await databaseService.updateClientFiles(clientId, [{
+              id: file.id,
               client_id: clientId,
               source_item_id: file.source_item_id,
               name: file.name,

@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Client, SystemSettings, SyncedFile, Tag } from './types.ts';
 import { apiService } from './services/apiService.ts';
 import { googleDriveService } from './services/googleDriveService.ts';
@@ -25,8 +25,11 @@ const App: React.FC = () => {
   // New state for switching views
   const [activeTab, setActiveTab] = useState<'search' | 'edit'>('search');
   
-  // Track syncing state strictly to prevent overlapping syncs during the 10s polling
+  // Track syncing state for Manual Sync button logic
   const [isSyncingClient, setIsSyncingClient] = useState<string | null>(null);
+  
+  // Ref to lock auto-sync interval execution
+  const isAutoSyncingRef = useRef(false);
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId), [clients, selectedClientId]);
 
@@ -66,7 +69,7 @@ const App: React.FC = () => {
     }
   }, [settings]);
 
-  // FIXED SYNC MECHANISM: 10 Seconds Loop
+  // FIXED SYNC MECHANISM: 10 Seconds Loop with useRef Lock
   useEffect(() => {
     const hasDataSource = !!selectedClient?.google_drive_folder_url;
 
@@ -77,12 +80,13 @@ const App: React.FC = () => {
     const syncClientData = async () => {
       if (!selectedClient?.id) return;
       
-      // Prevent overlapping syncs if the previous one is still running
-      if (isSyncingClient === selectedClient.id) {
-          console.log(`Sync for ${selectedClient.name} skipped: Previous sync still in progress.`);
+      // Prevent overlapping syncs using the Ref lock AND checking the manual sync state
+      if (isAutoSyncingRef.current || (isSyncingClient === selectedClient.id)) {
+          // console.log(`[Auto-Sync] Skipped: Sync already in progress.`);
           return;
       }
 
+      isAutoSyncingRef.current = true;
       console.log(`[Auto-Sync] Checking for modifications for client: ${selectedClient.name}...`);
 
       const onProgress = (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => {
@@ -96,7 +100,7 @@ const App: React.FC = () => {
                               return {
                                 ...(existing || {}),
                                 ...f,
-                                id: f.id || existing?.id || crypto.randomUUID(),
+                                id: f.id || existing?.id || crypto.randomUUID(), // Maintain existing ID if available
                                 client_id: selectedClient.id,
                                 status: f.status || 'IDLE',
                                 created_at: existing?.created_at || new Date().toISOString(),
@@ -121,6 +125,8 @@ const App: React.FC = () => {
         console.log(`[Auto-Sync] Completed for ${selectedClient.name}.`);
       } catch (error) {
         console.error(`[Auto-Sync] Failed for ${selectedClient.name}:`, error);
+      } finally {
+        isAutoSyncingRef.current = false;
       }
     };
 
@@ -380,7 +386,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.4.2 (Smart Editor)</p>
+        <p>v1.4.3 (Smart Editor)</p>
       </footer>
 
       {isGoogleAuthModalOpen && settings && (
