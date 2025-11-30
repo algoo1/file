@@ -33,9 +33,9 @@ Your capability is to manipulate structured data (CSV) based on natural language
 
 2.  **Precise Action Logic:**
     *   **"Add/Link Image" (CRITICAL):** 
-        *   If the user has uploaded an image, you will be provided with its **FILENAME**.
-        *   **ACTION:** Insert this **FILENAME** (e.g., "image_12345_shoe.jpg") into the appropriate 'Image', 'Photo', or 'Asset' column. 
-        *   **DO NOT** insert a full URL (like http://...). Just the file name or code.
+        *   If the user has uploaded an image, you will be provided with its **IMAGE CODE**.
+        *   **ACTION:** Insert this **IMAGE CODE** (e.g., "IMG-58392.jpg") into the appropriate 'Image', 'Photo', or 'Asset' column. 
+        *   **DO NOT** insert a full URL. Just the code provided.
         *   If no image column exists, create one named "Image".
     
     *   **"Delete/Remove Text/Cell":** Clear the specific cell content. Do NOT delete the row unless asked.
@@ -66,8 +66,8 @@ ${originalCsv}
         if (uploadedFileName) {
             prompt += `\n**SYSTEM EVENT - IMAGE UPLOAD:** 
 The user has uploaded an image file.
-**FILENAME:** ${uploadedFileName}
-**INSTRUCTION:** You MUST insert this **FILENAME** ("${uploadedFileName}") into the row identified by the User Request. Use this filename as the reference code.
+**IMAGE CODE:** ${uploadedFileName}
+**INSTRUCTION:** You MUST insert this **IMAGE CODE** ("${uploadedFileName}") into the row identified by the User Request. Use this code exactly as is.
 `;
         }
 

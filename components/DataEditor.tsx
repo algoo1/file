@@ -60,7 +60,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
             const currentContent = await googleDriveService.getFileContent(driveMeta.id, 'application/vnd.google-apps.spreadsheet');
 
             // 2. Handle Image Upload if present
-            let uploadedFileName = undefined;
+            let uploadedFileCode = undefined;
             if (selectedImage && selectedImage.fileObject && client.google_drive_folder_url) {
                 setLoadingStage('Uploading image to Drive...');
                 try {
@@ -69,20 +69,22 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                         // Find or Create 'image' folder
                         const imagesFolderId = await googleDriveService.findOrCreateFolder(parentFolderId, 'image');
                         
-                        // Generate a clean filename: image_{timestamp}_{original}
-                        const cleanName = `image_${Date.now()}_${selectedImage.fileObject.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+                        // Generate a clean "Code" for the image: IMG-{Random}.ext
+                        // This satisfies "take the image's code or name".
+                        const ext = selectedImage.fileObject.name.split('.').pop() || 'jpg';
+                        const imageCode = `IMG-${Date.now().toString().slice(-6)}.${ext}`;
                         
                         // We still upload to Drive so the file physically exists in the cloud
                         await googleDriveService.uploadImageFile(
                             imagesFolderId, 
-                            cleanName, 
+                            imageCode, 
                             selectedImage.data, 
                             selectedImage.mimeType
                         );
                         
-                        // CRITICAL CHANGE: We pass the FILENAME, not the URL, to the AI.
-                        uploadedFileName = cleanName;
-                        console.log("Image uploaded. Using filename for CSV:", uploadedFileName);
+                        // We pass this CODE to the AI
+                        uploadedFileCode = imageCode;
+                        console.log("Image uploaded. Using Code for CSV:", uploadedFileCode);
                     }
                 } catch (uploadError) {
                     console.error("Failed to upload image:", uploadError);
@@ -97,7 +99,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                 instruction, 
                 fileSearchApiKey, 
                 selectedImage ? { data: selectedImage.data, mimeType: selectedImage.mimeType } : undefined,
-                uploadedFileName // Passing the name/code
+                uploadedFileCode // Passing the simple Code
             );
 
             setPreview({
@@ -160,7 +162,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                 <p className="text-sm text-gray-400 mt-1">
                     Modify your product data using natural language. Add images, delete rows, or update text. 
                     <br/>
-                    <span className="text-xs text-gray-500">* Images uploaded here are saved to Drive, and their <strong>filename</strong> is added to the sheet.</span>
+                    <span className="text-xs text-gray-500">* Images are uploaded to Drive and inserted as a short <strong>Reference Code</strong> (e.g., IMG-1234.jpg).</span>
                 </p>
             </div>
 

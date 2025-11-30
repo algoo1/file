@@ -230,7 +230,11 @@ export const apiService = {
                 
                 const fileData = { ...fileMeta, content };
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
-                finalFileObject.statusMessage = 'Successfully synced.';
+                
+                // Only set success message if status is actually completed
+                if (finalFileObject.status === 'COMPLETED') {
+                     finalFileObject.statusMessage = 'Successfully synced.';
+                }
 
             } catch (error) {
                  console.error(`Error processing ${fileMeta.name}:`, error);
@@ -338,7 +342,7 @@ export const apiService = {
               source_item_id: file.source_item_id,
               name: processed.name,
               status: processed.status,
-              status_message: 'Manual sync completed.',
+              status_message: processed.status === 'COMPLETED' ? 'Manual sync completed.' : processed.statusMessage,
               summary: processed.summary,
               last_synced_at: new Date().toISOString(), // Updates last sync time
               source_modified_at: processed.source_modified_at,
