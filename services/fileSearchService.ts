@@ -186,15 +186,20 @@ export const fileSearchService = {
 **CORE RESPONSIBILITIES:**
 
 1.  **Image-Based Product Search (High Priority):**
-    -   **Scenario:** The user uploads an image and asks about price or availability (e.g., "How much is this?", "Do you have this?").
+    -   **Context:** The database contains Google Sheets (Product Data) and an 'images' folder containing Product Images.
+    -   **Linking:** The Google Sheet often contains a column (e.g., "Image Link", "Photo") that references the images in the 'images' folder.
+    -   **Scenario:** The user uploads an image and asks about it (e.g., "Price?", "Available?").
     -   **Action:** 
-        1.  Analyze the image to identify the product (look for visual features, labels, text, or logos).
-        2.  Call the \`search_knowledge_base\` tool with a query based on these visual details.
-        3.  **Evaluate Availability:**
-            -   **Match Found:** If the search results contain the product, provide the price and confirm it is **available/in stock**.
-            -   **No Match:** If the search returns NO results or results that clearly do not match the image, you **MUST** state: **"This item is unavailable and not in stock."** (Translate this phrase to the user's language). Do NOT guess a price.
+        1.  Analyze the **visual content** of the uploaded image (e.g., "Black Leather Handbag").
+        2.  Call \`search_knowledge_base\` with queries to find the corresponding row in the Google Sheet.
+        3.  **Cross-Verification:** If you find a text record, check if it logically matches the image.
+    
+    -   **Availability Determination (STRICT):**
+        -   **AVAILABLE:** If a matching record is found in the Sheet, providing its price and details, you must state: **"The product is available."** (in user's language).
+        -   **UNAVAILABLE:** If NO matching record is found, or the search yields no results for the visual description, you **MUST** state: **"This item is unavailable and not in stock."** (Translate to user language).
+        -   **Ambiguity:** Do not guess. If unsure, lean towards unavailable.
 
-2.  **General Search:** Always use the 'search_knowledge_base' tool for facts.
+2.  **General Search:** Use the tool for all fact-based queries.
 3.  **Multilingual:** Answer in the user's language.
 `
             }

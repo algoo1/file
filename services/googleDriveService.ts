@@ -252,6 +252,10 @@ export const googleDriveService = {
       return urlMatch ? urlMatch[1] : null;
   },
 
+  /**
+   * Recursive function to get all files from a folder and its subfolders.
+   * Supports nested folder structures.
+   */
   getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string; modifiedTime: string }[]> => {
     const gapi = window.gapi as any;
     
@@ -263,13 +267,53 @@ export const googleDriveService = {
         throw new Error("Invalid Google Drive folder URL.");
     }
     
+    // Internal recursive fetcher
+    const fetchFilesRecursively = async (parentId: string): Promise<any[]> => {
+         let allFiles: any[] = [];
+         let pageToken = null;
+
+         // Query: in parent, not trashed, is folder OR is supported file type
+         const query = `'${parentId}' in parents and trashed = false and (mimeType='application/vnd.google-apps.folder' or mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp')`;
+
+         do {
+            try {
+                const response: any = await gapi.client.drive.files.list({
+                    q: query,
+                    fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
+                    pageSize: 1000,
+                    pageToken: pageToken
+                });
+                
+                const items = response.result.files || [];
+                
+                // Separate files and folders
+                const files = items.filter((i: any) => i.mimeType !== 'application/vnd.google-apps.folder');
+                const folders = items.filter((i: any) => i.mimeType === 'application/vnd.google-apps.folder');
+                
+                // Add current level files
+                allFiles = allFiles.concat(files);
+
+                // Recursively fetch subfolders (sequentially to reduce rate limit risk)
+                for (const folder of folders) {
+                    const subFolderFiles = await fetchFilesRecursively(folder.id);
+                    allFiles = allFiles.concat(subFolderFiles);
+                }
+                
+                pageToken = response.result.nextPageToken;
+            } catch (err: any) {
+                console.error(`Error scanning folder ${parentId}:`, err);
+                throw err;
+            }
+         } while (pageToken);
+
+         return allFiles;
+    };
+
     try {
-        const response = await gapi.client.drive.files.list({
-          q: `'${folderId}' in parents and trashed = false and (mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp')`,
-          fields: 'files(id, name, mimeType, modifiedTime)',
-          pageSize: 500
-        });
-        return response.result.files || [];
+        const allFiles = await fetchFilesRecursively(folderId);
+        // Deduplicate just in case
+        const uniqueFiles = Array.from(new Map(allFiles.map((item:any) => [item.id, item])).values());
+        return uniqueFiles as any[];
     } catch (error: any) {
         const msg = error.result?.error?.message || error.message || JSON.stringify(error);
         throw new Error(`Failed to list files: ${msg}`);

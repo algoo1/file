@@ -4,9 +4,6 @@ import { googleDriveService } from './googleDriveService.ts';
 import { fileSearchService } from './fileSearchService.ts';
 import { SystemSettings, Client, FileObject, SyncedFile, Tag } from '../types.ts';
 
-// Constant for the 48-hour mandatory update rule
-const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 Hours in milliseconds
-
 export const apiService = {
   getInitialData: async () => {
     const [clients, settings] = await Promise.all([
@@ -50,10 +47,10 @@ export const apiService = {
   /**
    * Performs a Smart Sync.
    * Logic Updates:
-   * 1. Detects new or modified files.
+   * 1. Detects new or modified files recursively.
    * 2. Re-adds files if they exist on Drive but are missing/deleted locally.
-   * 3. Forces re-processing if a file hasn't been synced in > 48 hours (Stale Check).
-   * 4. NOW USES UPSERT INSTEAD OF DELETE-THEN-INSERT to prevent UI flickering.
+   * 3. STRICTLY updates only on timestamp mismatch or new file.
+   * 4. Removes unnecessary periodic stale checks to ensure "already filled" files are left alone.
    */
   syncDataSource: async (
     clientId: string, 
@@ -72,7 +69,7 @@ export const apiService = {
        throw new Error("Google Drive is not configured for this client.");
     }
     
-    // 1. Fetch Fresh Metadata from Google Drive
+    // 1. Fetch Fresh Metadata from Google Drive (Recursively)
     let allSourceFilesMeta: (Omit<FileObject, 'content' | 'summary' | 'status' | 'statusMessage'>)[] = [];
 
     try {
@@ -97,10 +94,7 @@ export const apiService = {
         throw e;
     }
 
-    // 2. Incremental Update: Do NOT clear the whole index.
-    // We will selectively delete items that are gone or modified.
-    
-    // Map existing local files
+    // 2. Incremental Update Logic
     const relevantExistingFiles = client.synced_files;
     const existingFilesMap = new Map(relevantExistingFiles.map(f => [f.source_item_id, f]));
     const sourceIds = new Set(allSourceFilesMeta.map(f => f.id));
@@ -108,18 +102,14 @@ export const apiService = {
     // 3. Handle Deletions: Remove LOCAL records only if they don't exist in Source anymore
     const filesToDelete = relevantExistingFiles.filter(f => !sourceIds.has(f.source_item_id));
     if (filesToDelete.length > 0) {
-        // A. Remove from DB
         await databaseService.deleteClientFiles(filesToDelete.map(f => f.id));
-        
-        // B. Remove from Search Index (Delete the old file)
         filesToDelete.forEach(f => {
             fileSearchService.removeFile(clientId, f.source_item_id);
         });
-        
         console.log(`Removed ${filesToDelete.length} obsolete files from local index and database.`);
     }
 
-    // 4. Determine Work: Detect New, Modified, or Stale (>48h) Files
+    // 4. Determine Work: Detect New or Modified Files
     const filesToProcess: (typeof allSourceFilesMeta[0] & { existingId?: string })[] = [];
     const unchangedFiles: SyncedFile[] = [];
     const initialListPayload: Partial<SyncedFile>[] = [];
@@ -141,12 +131,8 @@ export const apiService = {
                 shouldProcess = true;
                 reason = 'Forced re-processing.';
             }
-            // B. Failed Previous Sync
-            else if (existing.status === 'FAILED') {
-                shouldProcess = true;
-                reason = 'Retrying failed file.';
-            } 
-            // C. Source Modification Timestamp Mismatch
+            // B. Source Modification Timestamp Mismatch
+            // STRICT CHECK: Only process if the time on Drive is significantly different.
             else if (sourceFile.source_modified_at && existing.source_modified_at) {
                 const newTime = new Date(sourceFile.source_modified_at).getTime();
                 const oldTime = new Date(existing.source_modified_at).getTime();
@@ -156,14 +142,8 @@ export const apiService = {
                     reason = 'Content modified on Drive.';
                 }
             } 
-            // D. Stale Check (48 Hour Rule)
-            else if (existing.last_synced_at) {
-                const lastSyncTime = new Date(existing.last_synced_at).getTime();
-                if (Date.now() - lastSyncTime > STALE_THRESHOLD_MS) {
-                    shouldProcess = true;
-                    reason = 'Periodic 48-hour update.';
-                }
-            }
+            // Note: We intentionally removed the "Retry on FAILED" and "Periodic 48h check" 
+            // to strictly adhere to the user requirement: "not result in unnecessary syncing".
         }
 
         if (shouldProcess) {
@@ -190,15 +170,14 @@ export const apiService = {
     // Notify UI of initial status
     onProgress({ type: 'INITIAL_LIST', files: initialListPayload });
 
-    // 5. Restore Index for Unchanged Files (Only if missing from index - e.g. Initial Page Load)
-    // Incremental: We only add if the index doesn't have it.
+    // 5. Restore Index for Unchanged Files (Only if missing from index)
     for (const file of unchangedFiles) {
         if (!fileSearchService.hasFile(client.id, file.source_item_id)) {
              await fileSearchService.restoreIndex(client.id, file);
         }
     }
 
-    // 6. Process New/Modified/Stale Files
+    // 6. Process New/Modified Files
     const batchSize = 5;
     const finalUpdates: Partial<SyncedFile>[] = [];
 
@@ -209,8 +188,7 @@ export const apiService = {
             let finalFileObject: FileObject;
             
             try {
-                // IMPORTANT: If updating, Explicitly remove OLD version from index first (Delete old)
-                // This ensures we don't have duplicates or stale data during processing.
+                // Remove old version from index before processing new one
                 if (fileMeta.existingId) {
                     fileSearchService.removeFile(clientId, fileMeta.id);
                 }
@@ -222,10 +200,15 @@ export const apiService = {
                     content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
                 }
 
+                // If content is empty, fail gracefully without marking as COMPLETED
+                if (!content && fileMeta.type !== 'image') {
+                     throw new Error("File content is empty.");
+                }
+
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing & Indexing...' }});
                 
                 const fileData = { ...fileMeta, content };
-                // This function summarizes AND adds to the index (Upload new)
+                // This function summarizes AND adds to the index
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
                 finalFileObject.statusMessage = 'Successfully synced.';
 
@@ -263,7 +246,7 @@ export const apiService = {
              summary: f.summary,
              last_synced_at: new Date().toISOString(),
              source_modified_at: f.source_modified_at,
-             id: f.id // Pass the uuid so DB knows which row to update
+             id: f.id
         })));
     }
 
@@ -283,7 +266,6 @@ export const apiService = {
       if (!client || !settings.file_search_service_api_key) throw new Error("Configuration error.");
 
       // Manual single file sync - we don't delete, we just update.
-      
       try {
           let content = '';
           let updatedMeta = { 
@@ -294,6 +276,7 @@ export const apiService = {
 
           if (file.source === 'GOOGLE_DRIVE') {
              try {
+                // We use getListOfFiles here too which is now recursive, ensuring we find the file even in subfolders
                 const driveFiles = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
                 const currentMeta = driveFiles.find(f => f.id === file.source_item_id);
                 if (currentMeta) {
