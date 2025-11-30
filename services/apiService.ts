@@ -190,7 +190,9 @@ export const apiService = {
     onProgress({ type: 'INITIAL_LIST', files: initialListPayload });
 
     // 5. Process Queue (Download -> Summarize -> Update DB)
-    const batchSize = 5;
+    // CRITICAL: Set to 1 to prevent "RESOURCE_EXHAUSTED" (429) errors from Google Gemini API.
+    // The Free Tier has strict RPM/RPD limits. Serial processing ensures better reliability.
+    const batchSize = 1;
     const finalUpdates: Partial<SyncedFile>[] = [];
 
     for (let i = 0; i < filesToProcess.length; i += batchSize) {

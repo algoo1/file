@@ -145,8 +145,9 @@ ${truncatedContent}
   }
 
 
-  const MAX_RETRIES = 3;
-  const INITIAL_BACKOFF_MS = 1000;
+  // UPDATED: Increased retries and base backoff to handle free tier rate limits better
+  const MAX_RETRIES = 10;
+  const INITIAL_BACKOFF_MS = 3000;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -176,25 +177,35 @@ ${truncatedContent}
       
       // Smart retry for 429 Rate Limit errors
       if (error instanceof Error) {
-        try {
-          // The SDK often stringifies the actual API error object in the message property.
-          const errorDetails = JSON.parse(error.message);
-          if (errorDetails.error?.code === 429 && errorDetails.error?.details) {
-            const retryInfo = errorDetails.error.details.find(
-              (d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
-            );
-            
-            if (retryInfo?.retryDelay) {
-              const parsedDelay = parseRetryDelay(retryInfo.retryDelay);
-              if (parsedDelay) {
-                delay = parsedDelay + (Math.random() * 500); // Add jitter to avoid thundering herd
-                console.log(`Rate limit exceeded. API suggested retrying in ${retryInfo.retryDelay}. Waiting for ${delay.toFixed(0)}ms.`);
-              }
+        const errMessage = error.message;
+        const isRateLimit = errMessage.includes('429') || errMessage.includes('RESOURCE_EXHAUSTED');
+        
+        if (isRateLimit) {
+            // Force a higher delay minimum for rate limits
+            if (delay < 10000) {
+                 delay = 15000 + (Math.random() * 5000); // Wait at least 15-20s
             }
-          }
-        } catch (e) {
-          // Not a parsable JSON error message, proceed with the default backoff.
-          console.log("Could not parse specific retry delay from error. Using default backoff.");
+            
+            try {
+                // Try to extract structured retry info
+                const errorDetails = JSON.parse(errMessage);
+                if (errorDetails.error?.details) {
+                    const retryInfo = errorDetails.error.details.find(
+                    (d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
+                    );
+                    
+                    if (retryInfo?.retryDelay) {
+                        const parsedDelay = parseRetryDelay(retryInfo.retryDelay);
+                        if (parsedDelay) {
+                            delay = parsedDelay + (Math.random() * 1000);
+                            console.log(`Rate limit exceeded. API suggested retrying in ${retryInfo.retryDelay}.`);
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore parse errors, stick to the robust delay
+            }
+             console.log(`Rate limit (429) hit. Backing off for ${delay.toFixed(0)}ms.`);
         }
       }
 
