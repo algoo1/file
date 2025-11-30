@@ -97,8 +97,8 @@ export const apiService = {
         throw e;
     }
 
-    // 2. Clear Local Search Index (Rebuilt from DB + Updates)
-    await fileSearchService.clearIndexForClient(clientId);
+    // 2. Incremental Update: Do NOT clear the whole index.
+    // We will selectively delete items that are gone or modified.
     
     // Map existing local files
     const relevantExistingFiles = client.synced_files;
@@ -106,15 +106,20 @@ export const apiService = {
     const sourceIds = new Set(allSourceFilesMeta.map(f => f.id));
     
     // 3. Handle Deletions: Remove LOCAL records only if they don't exist in Source anymore
-    // Note: We NEVER delete from Google Drive.
     const filesToDelete = relevantExistingFiles.filter(f => !sourceIds.has(f.source_item_id));
     if (filesToDelete.length > 0) {
+        // A. Remove from DB
         await databaseService.deleteClientFiles(filesToDelete.map(f => f.id));
-        console.log(`Removed ${filesToDelete.length} obsolete files from local index (Source files missing).`);
+        
+        // B. Remove from Search Index (Delete the old file)
+        filesToDelete.forEach(f => {
+            fileSearchService.removeFile(clientId, f.source_item_id);
+        });
+        
+        console.log(`Removed ${filesToDelete.length} obsolete files from local index and database.`);
     }
 
     // 4. Determine Work: Detect New, Modified, or Stale (>48h) Files
-    // We now attach the existing DB ID to the file meta if available, so we can Update instead of Insert.
     const filesToProcess: (typeof allSourceFilesMeta[0] & { existingId?: string })[] = [];
     const unchangedFiles: SyncedFile[] = [];
     const initialListPayload: Partial<SyncedFile>[] = [];
@@ -145,13 +150,13 @@ export const apiService = {
             else if (sourceFile.source_modified_at && existing.source_modified_at) {
                 const newTime = new Date(sourceFile.source_modified_at).getTime();
                 const oldTime = new Date(existing.source_modified_at).getTime();
+                // 1 Second tolerance for clock skew
                 if (!isNaN(newTime) && !isNaN(oldTime) && Math.abs(newTime - oldTime) > 1000) {
                     shouldProcess = true;
                     reason = 'Content modified on Drive.';
                 }
             } 
             // D. Stale Check (48 Hour Rule)
-            // If the file hasn't been synced/indexed by our system in > 48 hours, update it.
             else if (existing.last_synced_at) {
                 const lastSyncTime = new Date(existing.last_synced_at).getTime();
                 if (Date.now() - lastSyncTime > STALE_THRESHOLD_MS) {
@@ -176,18 +181,21 @@ export const apiService = {
                 status_message: reason
             });
         } else {
-            // Unchanged and Fresh: Just restore to search index
+            // Unchanged and Fresh
             unchangedFiles.push(existing!);
             initialListPayload.push(existing!);
         }
     }
 
-    // Notify UI of initial status (some Syncing, some Idle)
+    // Notify UI of initial status
     onProgress({ type: 'INITIAL_LIST', files: initialListPayload });
 
-    // 5. Restore Index for Unchanged Files
+    // 5. Restore Index for Unchanged Files (Only if missing from index - e.g. Initial Page Load)
+    // Incremental: We only add if the index doesn't have it.
     for (const file of unchangedFiles) {
-        await fileSearchService.restoreIndex(client.id, file);
+        if (!fileSearchService.hasFile(client.id, file.source_item_id)) {
+             await fileSearchService.restoreIndex(client.id, file);
+        }
     }
 
     // 6. Process New/Modified/Stale Files
@@ -201,6 +209,12 @@ export const apiService = {
             let finalFileObject: FileObject;
             
             try {
+                // IMPORTANT: If updating, Explicitly remove OLD version from index first (Delete old)
+                // This ensures we don't have duplicates or stale data during processing.
+                if (fileMeta.existingId) {
+                    fileSearchService.removeFile(clientId, fileMeta.id);
+                }
+
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Downloading content...' }});
                 
                 let content = '';
@@ -211,6 +225,7 @@ export const apiService = {
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing & Indexing...' }});
                 
                 const fileData = { ...fileMeta, content };
+                // This function summarizes AND adds to the index (Upload new)
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
                 finalFileObject.statusMessage = 'Successfully synced.';
 
@@ -297,6 +312,9 @@ export const apiService = {
                  throw error;
              }
           }
+
+          // Delete old version from index explicitly before update
+          fileSearchService.removeFile(clientId, file.source_item_id);
 
           const fileData: Omit<FileObject, 'summary' | 'status' | 'statusMessage'> = {
               id: file.source_item_id,

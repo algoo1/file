@@ -86,6 +86,25 @@ export const fileSearchService = {
   },
 
   /**
+   * Removes a single file from the client's search index.
+   */
+  removeFile: (clientId: string, fileId: string) => {
+    const index = getClientIndex(clientId);
+    if (index.has(fileId)) {
+        index.discard(fileId);
+        console.log(`Removed file ${fileId} from index.`);
+    }
+  },
+  
+  /**
+   * Checks if a file exists in the index.
+   */
+  hasFile: (clientId: string, fileId: string) => {
+      const index = getClientIndex(clientId);
+      return index.has(fileId);
+  },
+
+  /**
    * Restores a file to the search index using existing data from the database.
    * Does NOT call the AI service. This is used for "Smart Sync" when a file hasn't changed.
    */
