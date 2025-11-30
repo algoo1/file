@@ -44,14 +44,6 @@ export interface Client {
   name: string;
   api_key: string;
   google_drive_folder_url: string | null;
-  
-  // Airtable fields
-  airtable_access_token?: string | null;
-  airtable_refresh_token?: string | null;
-  airtable_token_expires_at?: string | null;
-  airtable_api_key?: string | null;
-  airtable_base_id?: string | null;
-  airtable_table_id?: string | null;
 
   created_at: string;
   updated_at: string;
@@ -66,9 +58,6 @@ export interface SystemSettings {
   google_api_key: string | null;
   google_client_id: string | null;
   is_google_drive_connected: boolean;
-
-  // Airtable fields
-  airtable_client_id?: string | null;
 
   created_at: string;
   updated_at: string;

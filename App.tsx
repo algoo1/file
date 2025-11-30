@@ -11,7 +11,6 @@ import DataEditor from './components/DataEditor.tsx';
 import ApiDetails from './components/ApiDetails.tsx';
 import Settings from './components/Settings.tsx';
 import GoogleAuthModal from './components/GoogleAuthModal.tsx';
-import AirtableAuthModal from './components/AirtableAuthModal.tsx';
 import { DriveIcon } from './components/icons/DriveIcon.tsx';
 import { XCircleIcon } from './components/icons/XCircleIcon.tsx';
 
@@ -22,7 +21,6 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState(false);
-  const [isAirtableModalOpen, setIsAirtableModalOpen] = useState(false);
   
   // New state for switching views
   const [activeTab, setActiveTab] = useState<'search' | 'edit'>('search');
@@ -163,18 +161,6 @@ const App: React.FC = () => {
       console.error("Google Drive connection failed:", error);
       alert(`Failed to connect to Google Drive: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
-    }
-  }, [handleSaveSettings]);
-
-  const handleConnectAirtable = useCallback(async (creds: { clientId: string }) => {
-    try {
-        await handleSaveSettings({
-            airtable_client_id: creds.clientId
-        });
-        setIsAirtableModalOpen(false);
-    } catch (error) {
-        console.error("Airtable settings save failed:", error);
-        alert("Failed to save Airtable settings.");
     }
   }, [handleSaveSettings]);
 
@@ -331,7 +317,6 @@ const App: React.FC = () => {
             settings={settings}
             onSave={handleSaveSettings}
             onOpenGoogleAuthModal={() => setIsGoogleAuthModalOpen(true)}
-            onOpenAirtableModal={() => setIsAirtableModalOpen(true)}
           />
           <ClientManager 
             clients={clients} 
@@ -395,7 +380,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.4.1 (Smart Editor)</p>
+        <p>v1.4.2 (Smart Editor)</p>
       </footer>
 
       {isGoogleAuthModalOpen && settings && (
@@ -404,14 +389,6 @@ const App: React.FC = () => {
             initialSettings={settings}
             onConnect={handleConnectGoogleDrive}
             isConnected={!!settings.is_google_drive_connected}
-        />
-      )}
-      
-      {isAirtableModalOpen && settings && (
-        <AirtableAuthModal
-            onClose={() => setIsAirtableModalOpen(false)}
-            initialSettings={settings}
-            onSave={handleConnectAirtable}
         />
       )}
     </div>
