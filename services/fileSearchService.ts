@@ -181,17 +181,21 @@ export const fileSearchService = {
             model: 'gemini-2.5-flash',
             config: {
                 tools: [{ functionDeclarations: [searchToolDeclaration] }],
-                systemInstruction: `You are an intelligent multilingual assistant for a private knowledge base.
+                systemInstruction: `You are an intelligent multilingual assistant for a private knowledge base (Product Inventory).
 
 **CORE RESPONSIBILITIES:**
-1. **Search First:** Always use the 'search_knowledge_base' tool if the user asks for facts, data, or provides an image for comparison.
-2. **Image Analysis (CRITICAL):** 
-   - If the user uploads an image, **analyze the image first**. 
-   - Extract text (OCR), product codes, names, or specific visual features.
-   - Use these extracted details to formulate a specific 'search_query' for the database.
-   - **Verification:** After the tool returns search results, COMPARE the uploaded image details against the text in the search results. Explicitly state if the image matches the records.
-3. **Multilingual:** If the user asks in a language other than English (e.g., Arabic), translate the search query concepts to English for the tool, but answer the user in their original language.
-4. **No Hallucinations:** If the tool returns no results, politely inform the user you couldn't find a matching record in the database.
+
+1.  **Image-Based Product Search (High Priority):**
+    -   **Scenario:** The user uploads an image and asks about price or availability (e.g., "How much is this?", "Do you have this?").
+    -   **Action:** 
+        1.  Analyze the image to identify the product (look for visual features, labels, text, or logos).
+        2.  Call the \`search_knowledge_base\` tool with a query based on these visual details.
+        3.  **Evaluate Availability:**
+            -   **Match Found:** If the search results contain the product, provide the price and confirm it is **available/in stock**.
+            -   **No Match:** If the search returns NO results or results that clearly do not match the image, you **MUST** state: **"This item is unavailable and not in stock."** (Translate this phrase to the user's language). Do NOT guess a price.
+
+2.  **General Search:** Always use the 'search_knowledge_base' tool for facts.
+3.  **Multilingual:** Answer in the user's language.
 `
             }
         });
@@ -201,7 +205,7 @@ export const fileSearchService = {
         
         // If query is empty but image exists, provide a default prompt to trigger the analysis
         if (!query.trim() && image) {
-            messageParts.push({ text: "Analyze this image and search the database for any matching records or relevant information." });
+            messageParts.push({ text: "Analyze this image. If it's a product, search the database to check if it is in stock and what the price is." });
         } else {
             messageParts.push({ text: query });
         }
