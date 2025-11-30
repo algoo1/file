@@ -18,9 +18,10 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
     const [selectedFileId, setSelectedFileId] = useState<string>('');
     const [instruction, setInstruction] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingStage, setLoadingStage] = useState<string>(''); // For granular loading messages
     const [preview, setPreview] = useState<{ explanation: string; updatedCsv: string; originalCsv: string } | null>(null);
     const [executionStatus, setExecutionStatus] = useState<'idle' | 'updating' | 'success' | 'error'>('idle');
-    const [selectedImage, setSelectedImage] = useState<{ data: string; mimeType: string } | null>(null);
+    const [selectedImage, setSelectedImage] = useState<{ data: string; mimeType: string, fileObject?: File } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Filter only Google Sheets (which act as our database tables)
@@ -32,7 +33,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
             const reader = new FileReader();
             reader.onloadend = () => {
                 const base64String = (reader.result as string).split(',')[1];
-                setSelectedImage({ data: base64String, mimeType: file.type });
+                setSelectedImage({ data: base64String, mimeType: file.type, fileObject: file });
             };
             reader.readAsDataURL(file);
         }
@@ -50,20 +51,49 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
             const file = sheetFiles.find(f => f.id === selectedFileId);
             if (!file) throw new Error("File not found");
 
-            // 1. Fetch current content (Live from Drive to ensure we don't overwrite stale data)
-            // We need the original meta to get the correct mimeType for download (usually csv export)
+            // 1. Fetch current content (Live from Drive)
+            setLoadingStage('Downloading current sheet...');
             const driveFiles = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
             const driveMeta = driveFiles.find(df => df.id === file.source_item_id);
             if (!driveMeta) throw new Error("File no longer exists on Drive.");
 
             const currentContent = await googleDriveService.getFileContent(driveMeta.id, 'application/vnd.google-apps.spreadsheet');
 
-            // 2. Call AI
+            // 2. Handle Image Upload if present
+            let uploadedImageUrl = undefined;
+            if (selectedImage && selectedImage.fileObject && client.google_drive_folder_url) {
+                setLoadingStage('Uploading image to Drive...');
+                try {
+                    const parentFolderId = googleDriveService.getFolderIdFromUrl(client.google_drive_folder_url);
+                    if (parentFolderId) {
+                        // Find or Create 'image' folder
+                        const imagesFolderId = await googleDriveService.findOrCreateFolder(parentFolderId, 'image');
+                        
+                        // Generate a clean filename: image_{timestamp}_{original}
+                        const cleanName = `image_${Date.now()}_${selectedImage.fileObject.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+                        
+                        uploadedImageUrl = await googleDriveService.uploadImageFile(
+                            imagesFolderId, 
+                            cleanName, 
+                            selectedImage.data, 
+                            selectedImage.mimeType
+                        );
+                        console.log("Image uploaded successfully:", uploadedImageUrl);
+                    }
+                } catch (uploadError) {
+                    console.error("Failed to upload image:", uploadError);
+                    alert("Warning: Failed to upload image to Drive. Proceeding with analysis only.");
+                }
+            }
+
+            // 3. Call AI
+            setLoadingStage('Generating edit plan...');
             const plan = await dataEditorService.generateEditPlan(
                 currentContent, 
                 instruction, 
                 fileSearchApiKey, 
-                selectedImage || undefined
+                selectedImage ? { data: selectedImage.data, mimeType: selectedImage.mimeType } : undefined,
+                uploadedImageUrl
             );
 
             setPreview({
@@ -76,6 +106,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
             alert(`Error: ${error instanceof Error ? error.message : 'Failed to generate plan'}`);
         } finally {
             setIsLoading(false);
+            setLoadingStage('');
         }
     };
 
@@ -123,7 +154,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                     <span className="text-blue-400">⚡</span> Smart Data Editor
                 </h2>
                 <p className="text-sm text-gray-400 mt-1">
-                    Modify your product data using natural language. Add, remove, or update rows safely.
+                    Modify your product data using natural language. Add images, delete rows, or update text in <strong>Arabic, English, French</strong>, and more.
                 </p>
             </div>
 
@@ -166,7 +197,10 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                                 <textarea
                                     value={instruction}
                                     onChange={(e) => setInstruction(e.target.value)}
-                                    placeholder="e.g. 'Change the price of the Leather Bag to $150' or 'Delete the item with ID 405'."
+                                    placeholder="Examples:
+- 'Add this image to the Red Shirt product'
+- 'امسح وصف المنتج الثالث' (Delete description of 3rd product)
+- 'Supprimer la ligne iPhone' (Delete the iPhone row)"
                                     className="flex-grow bg-gray-900 text-white rounded-md px-4 py-3 border border-gray-600 focus:ring-2 focus:ring-blue-500 focus:outline-none min-h-[80px]"
                                 />
                                 <div className="flex flex-col gap-2">
@@ -175,7 +209,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                                         type="button"
                                         onClick={() => fileInputRef.current?.click()}
                                         className="bg-gray-700 hover:bg-gray-600 text-gray-300 p-3 rounded-md h-full flex items-center justify-center transition-colors"
-                                        title="Attach Image for context (e.g. Add Product)"
+                                        title="Attach Image (Uploads to Drive & Links to Product)"
                                     >
                                         <ImageIcon className="w-6 h-6" />
                                     </button>
@@ -189,7 +223,13 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-md transition-all disabled:opacity-50 flex justify-center items-center"
                         >
                             {isLoading ? (
-                                <span className="animate-pulse">Processing Request...</span>
+                                <span className="animate-pulse flex items-center gap-2">
+                                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    {loadingStage || 'Processing...'}
+                                </span>
                             ) : "Analyze & Preview Changes"}
                         </button>
                     </form>
@@ -202,9 +242,10 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                             <div className="bg-green-500/20 p-2 rounded-full">
                                 <CheckCircleIcon className="w-6 h-6 text-green-400" />
                             </div>
-                            <div>
+                            <div className="w-full">
                                 <h3 className="font-bold text-white text-lg">Proposed Changes</h3>
-                                <p className="text-gray-300 mt-1">{preview.explanation}</p>
+                                {/* Explanation with improved text formatting */}
+                                <p className="text-gray-300 mt-1 whitespace-pre-wrap">{preview.explanation}</p>
                             </div>
                         </div>
 

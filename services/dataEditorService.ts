@@ -1,6 +1,5 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Client } from '../types.ts';
 
 interface EditPlan {
     explanation: string;
@@ -11,49 +10,67 @@ interface EditPlan {
 export const dataEditorService = {
     /**
      * Generates a plan to modify the CSV data based on a user's natural language request.
-     * @param originalCsv The current raw CSV content of the sheet.
-     * @param userInstruction The user's command (e.g., "Change price of X to Y").
-     * @param apiKey The Gemini API Key.
-     * @param image Optional image to provide context (e.g., "Add this product").
+     * Supports multilingual inputs (Arabic, English, French, etc.) and complex logic.
      */
     generateEditPlan: async (
         originalCsv: string,
         userInstruction: string,
         apiKey: string,
-        image?: { data: string; mimeType: string }
+        image?: { data: string; mimeType: string },
+        uploadedImageUrl?: string
     ): Promise<EditPlan> => {
         const ai = new GoogleGenAI({ apiKey });
 
-        const systemInstruction = `You are a precise Data Editor bot. 
-Your task is to take an existing CSV file (Product Inventory) and modify it based on the user's natural language request.
+        const systemInstruction = `You are a highly intelligent, world-class Data Operations Agent. 
+Your capability is to manipulate structured data (CSV) based on natural language instructions in **ANY language** (Arabic, English, French, Spanish, Chinese, etc.).
 
-**RULES:**
-1. **Preserve Structure:** You MUST output a valid CSV. Do not change headers unless explicitly asked. Do not break the row/column structure.
-2. **Precision:** If the user asks to change a specific product, find it by Name or ID. Do not touch other rows.
-3. **Smart Handling:** 
-   - If deleting: Remove the row completely.
-   - If adding: Append a new row with the data provided. Use "N/A" for missing columns.
-   - If the user provides an image for a new product, use the image description analysis (if available in context) or placeholders to fill the 'Image' column.
-4. **Safety:** If the request is ambiguous (e.g., "Delete everything"), ask for confirmation in the explanation, but still provide the CSV as if the action was taken so the user can preview it.
+**CORE DIRECTIVES:**
 
-**OUTPUT FORMAT:**
-Return a JSON object with:
-- \`explanation\`: A clear, concise summary of exactly what you changed. (e.g., "Updated 'Retail Price' for 'Blue Shirt' from $10 to $12.")
-- \`updatedCsv\`: The full, raw CSV string representing the new state of the file.
+1.  **Multilingual Intelligence:** 
+    *   The user may speak in Arabic (e.g., "امسح الوصف"), English ("Clear the description"), French ("Effacer la description"), etc.
+    *   The CSV headers might be in a completely different language than the user's command.
+    *   **Task:** You must intelligently map the user's intent to the correct columns and rows, regardless of language mismatches. (e.g., If user says "Change Price" in English, but the column is labeled "السعر" or "Prix", you MUST identify and edit that column).
+
+2.  **Precise Action Logic:**
+    *   **"Add/Link Image":** If an image URL is provided in the prompt context, find the most relevant column (e.g., "Image", "Photo", "Asset", "Link", "Avatar") or **create a new column named "Image"** if none exists. Insert the URL into the specific row identified by the user.
+    *   **"Delete/Remove Text/Cell":** If the user asks to remove specific *content* or a *value* (e.g., "remove the description", "delete the price"), **CLEAR that specific cell** (set to empty string). Do NOT delete the entire row unless explicitly asked.
+    *   **"Delete/Remove Product/Row":** If the user asks to remove an entire *item*, *record*, or *entry* (e.g., "delete the iPhone row", "remove the item with ID 5"), **DELETE the entire row**.
+    *   **"Update/Change":** Modify the specific value with high precision.
+
+3.  **Visual Context Awareness:**
+    *   If an image is attached for *analysis* (visual context), use it to identify the product in the CSV (e.g., user uploads a photo of red shoes and says "Change the price of this product"). You must match the visual description to the text data.
+
+4.  **Strict Output Format:**
+    *   You MUST return a JSON object.
+    *   \`explanation\`: A clear, concise summary of exactly what you changed. **IMPORTANT: Write this explanation in the SAME language the user used in their instruction.**
+    *   \`updatedCsv\`: The complete, valid, raw CSV string representing the new state of the file. Preserve all other data perfectly.
+    *   \`requiresConfirmation\`: true if the request is destructive (deleting > 1 row) or highly ambiguous.
+
 `;
 
-        const prompt = `
+        let prompt = `
 **Current CSV Content:**
 \`\`\`csv
 ${originalCsv}
 \`\`\`
 
 **User Request:** "${userInstruction}"
-
-${image ? "**(Note: An image was provided with this request. If this is an 'Add Product' request, assume the image belongs to the new item.)**" : ""}
-
-Generate the JSON response.
 `;
+        
+        // Inject the specific logic for the uploaded file link
+        if (uploadedImageUrl) {
+            prompt += `\n**SYSTEM EVENT - IMAGE UPLOAD:** 
+The user has uploaded an image to the cloud. 
+**URL:** ${uploadedImageUrl}
+**INSTRUCTION:** You MUST insert this URL into the appropriate Image/Photo column for the product identified in the User Request. If the request implies adding a NEW product, use this URL for its image.
+`;
+        }
+
+        if (image) {
+            prompt += `\n**(Note: An image has been provided as visual context. Use it to identify the product if the text description is vague.)**`;
+        }
+
+        prompt += `\nGenerate the JSON response.`;
 
         const parts: any[] = [{ text: prompt }];
         if (image) {

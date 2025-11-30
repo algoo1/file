@@ -356,5 +356,102 @@ export const googleDriveService = {
           console.error("Update failed:", error);
           throw error;
       }
+  },
+
+  /**
+   * Finds or creates a folder named 'image' inside the given parent folder.
+   */
+  findOrCreateFolder: async (parentFolderId: string, folderName: string): Promise<string> => {
+    const gapi = window.gapi as any;
+    await ensureAccessToken();
+
+    // 1. Check if folder exists
+    try {
+        const response = await gapi.client.drive.files.list({
+            q: `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and trashed = false`,
+            fields: 'files(id)',
+            pageSize: 1
+        });
+        
+        if (response.result.files && response.result.files.length > 0) {
+            return response.result.files[0].id;
+        }
+    } catch (e) {
+        console.warn("Error checking for existing folder, attempting creation.", e);
+    }
+
+    // 2. Create folder if not found
+    try {
+        const fileMetadata = {
+            name: folderName,
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [parentFolderId]
+        };
+        const createResponse = await gapi.client.drive.files.create({
+            resource: fileMetadata,
+            fields: 'id'
+        });
+        return createResponse.result.id;
+    } catch (e: any) {
+        throw new Error(`Failed to create '${folderName}' folder: ${e.message}`);
+    }
+  },
+
+  /**
+   * Uploads a base64 image to a specific folder and returns the webViewLink.
+   */
+  uploadImageFile: async (parentFolderId: string, fileName: string, base64Data: string, mimeType: string): Promise<string> => {
+    const gapi = window.gapi as any;
+    await ensureAccessToken();
+    const token = gapi?.client?.getToken();
+
+    const metadata = {
+        name: fileName,
+        parents: [parentFolderId]
+    };
+
+    // Convert base64 to binary string for the body
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const boundary = 'foo_bar_baz';
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const close_delim = "\r\n--" + boundary + "--";
+
+    // We can't easily concatenate binary data with strings for multipart in standard JS strings without encoding issues.
+    // Instead, we'll use a Blob for the whole body.
+    
+    const metadataBlob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
+    const fileBlob = new Blob([bytes], { type: mimeType });
+
+    // Construct the multipart body manually using an Array of parts if fetching
+    // simpler method: use gapi with multipart/related
+    
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', fileBlob);
+
+    try {
+        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token.access_token}`
+            },
+            body: form
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || "Upload failed");
+        }
+
+        const result = await response.json();
+        return result.webViewLink; // Returns the shareable link
+    } catch (e: any) {
+        throw new Error(`Failed to upload image: ${e.message}`);
+    }
   }
 };
