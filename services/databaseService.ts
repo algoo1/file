@@ -145,5 +145,26 @@ export const databaseService = {
             .delete()
             .in('id', ids);
         if (error) throw error;
+    },
+
+    /**
+     * Performs a text search against the SyncedFiles table.
+     * Searches both 'name' and 'summary' fields.
+     */
+    searchFiles: async (clientId: string, query: string): Promise<SyncedFile[]> => {
+        // We use ILIKE for case-insensitive partial matching.
+        // This acts as a basic "File Search" against the metadata we have synced.
+        const { data, error } = await supabase
+            .from('synced_files')
+            .select('*')
+            .eq('client_id', clientId)
+            .or(`name.ilike.%${query}%,summary.ilike.%${query}%`)
+            .limit(10); // Limit results for context window efficiency
+
+        if (error) {
+            console.error('Database search error:', error);
+            return [];
+        }
+        return data as SyncedFile[];
     }
 };

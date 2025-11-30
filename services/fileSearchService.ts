@@ -2,47 +2,7 @@
 import { GoogleGenAI, Type, FunctionDeclaration, Part } from "@google/genai";
 import { FileObject, Client, SyncedFile } from '../types.ts';
 import { summarizeSingleContent } from './geminiService.ts';
-import MiniSearch from 'minisearch';
-
-// In-memory store for MiniSearch instances, one for each client.
-const clientSearchIndexes: Record<string, MiniSearch> = {};
-
-/**
- * Initializes or retrieves a MiniSearch instance for a client.
- * @param clientId The ID of the client.
- * @returns A MiniSearch instance.
- */
-const getClientIndex = (clientId: string) => {
-    if (!clientSearchIndexes[clientId]) {
-        clientSearchIndexes[clientId] = new MiniSearch({
-            fields: ['name', 'summary'], // fields to index for full-text search
-            storeFields: ['name', 'summary', 'source'], // fields to return with search results
-            searchOptions: {
-                prefix: true, // support "prefix search" (e.g., "star" matches "starry")
-                fuzzy: 0.2,   // allow for some typos
-                // Boost summary slightly as it contains the multilingual keywords
-                boost: { summary: 2 } 
-            }
-        });
-    }
-    return clientSearchIndexes[clientId];
-};
-
-/**
- * Adds or updates a file in the client's MiniSearch index.
- * @param clientId The ID of the client.
- * @param file The file object containing the data to index.
- */
-const addOrUpdateFileInIndex = (clientId: string, file: Pick<FileObject, 'id' | 'name' | 'summary' | 'source'>) => {
-    const index = getClientIndex(clientId);
-    // Use a Map-like interface for documents, with `id` being the unique identifier.
-    if (index.has(file.id)) {
-        index.replace(file);
-    } else {
-        index.add(file);
-    }
-    console.log(`Indexed file "${file.name}" from ${file.source} for client ${clientId}. Index now contains ${index.documentCount} documents.`);
-};
+import { databaseService } from './databaseService.ts';
 
 // --- Tool Definition for Gemini ---
 const searchToolDeclaration: FunctionDeclaration = {
@@ -65,7 +25,6 @@ export const fileSearchService = {
    * Validates an API key.
    */
   validateApiKey: async (apiKey: string): Promise<boolean> => {
-    console.log(`Validating File Search API Key: ${apiKey ? 'present' : 'missing'}`);
     await new Promise(resolve => setTimeout(resolve, 100)); // Faster simulation
     const isValid = !!apiKey.trim();
     if (!isValid) console.warn(`API Key is invalid`);
@@ -73,54 +32,39 @@ export const fileSearchService = {
   },
 
   /**
-   * Wipes the search index for a given client.
-   * @param clientId The ID of the client whose index should be cleared.
+   * @deprecated Search is now stateless/DB-backed. No local index to clear.
    */
   clearIndexForClient: async (clientId: string): Promise<void> => {
-    if (clientSearchIndexes[clientId]) {
-        // Re-initialize the MiniSearch instance to clear it.
-        delete clientSearchIndexes[clientId];
-        console.log(`Cleared search index for client ${clientId}.`);
-    }
-    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async
+    // No-op
   },
 
   /**
-   * Removes a single file from the client's search index.
+   * @deprecated Search is now stateless/DB-backed. No local index to remove from.
    */
   removeFile: (clientId: string, fileId: string) => {
-    const index = getClientIndex(clientId);
-    if (index.has(fileId)) {
-        index.discard(fileId);
-        console.log(`Removed file ${fileId} from index.`);
-    }
+    // No-op
   },
   
   /**
    * Checks if a file exists in the index.
+   * Now proxies to DB check (conceptually), but for "Smart Sync" optimization,
+   * we assume if it's in the DB list passed to apiService, it's fine.
+   * This is mostly legacy for the previous MiniSearch implementation.
    */
   hasFile: (clientId: string, fileId: string) => {
-      const index = getClientIndex(clientId);
-      return index.has(fileId);
+      return false; // Force re-check or just rely on DB state
   },
 
   /**
-   * Restores a file to the search index using existing data from the database.
-   * Does NOT call the AI service. This is used for "Smart Sync" when a file hasn't changed.
+   * @deprecated Search is now stateless/DB-backed.
    */
   restoreIndex: async (clientId: string, file: SyncedFile): Promise<void> => {
-      if (file.status === 'COMPLETED' && file.summary) {
-          addOrUpdateFileInIndex(clientId, {
-              id: file.source_item_id,
-              name: file.name,
-              summary: file.summary,
-              source: file.source
-          });
-      }
+      // No-op
   },
   
   /**
-   * Processes a single file, summarizes it, and adds it to the local search index.
+   * Processes a single file to generate its AI summary.
+   * It no longer adds it to a local index, as the result is stored in the DB.
    * @param client The client object.
    * @param file The file data from Drive, including its content.
    * @param fileSearchApiKey The user's API key for Gemini.
@@ -138,13 +82,11 @@ export const fileSearchService = {
       ...file,
       summary: result.summary || '',
       status: result.error ? 'FAILED' : 'COMPLETED',
-      statusMessage: result.error || 'Successfully indexed.',
+      statusMessage: result.error || 'Successfully processed.',
     };
     
-    // Only add successfully processed files to the local search index.
-    if (processedFile.status === 'COMPLETED') {
-        addOrUpdateFileInIndex(client.id, processedFile);
-    }
+    // We return the object. The API service will save `summary` to Supabase.
+    // Supabase is then queried via `search_knowledge_base`.
 
     return processedFile;
   },
@@ -153,8 +95,8 @@ export const fileSearchService = {
   /**
    * Queries the data using Agentic RAG (Gemini Function Calling).
    * 1. The user query is sent to Gemini with a 'search_knowledge_base' tool.
-   * 2. Gemini decides if it needs to search and what keywords to use (translating if needed).
-   * 3. If called, we execute the local search and return results to Gemini.
+   * 2. Gemini decides if it needs to search.
+   * 3. If called, we execute the search against the SUPABASE DATABASE.
    * 4. Gemini synthesizes the final answer.
    */
   query: async (
@@ -169,11 +111,6 @@ export const fileSearchService = {
             return "Error: Invalid File Search API Key.";
         }
         
-        const localIndex = getClientIndex(client.id);
-        if (localIndex.documentCount === 0) {
-            return "There is no data indexed for this client. Please sync a data source first.";
-        }
-
         const ai = new GoogleGenAI({ apiKey: fileSearchApiKey });
         
         // Use 'chats' to maintain history for the multi-turn tool interaction
@@ -235,13 +172,8 @@ export const fileSearchService = {
             const searchQuery = (functionCall.args as any).search_query;
             console.log(`Gemini requested search for: "${searchQuery}"`);
 
-            // Execute Local Search
-            let searchResults = localIndex.search(searchQuery, {
-                fields: ['name', 'summary'],
-                combineWith: 'OR', // Robust 'OR' logic
-                prefix: true,
-                fuzzy: 0.2
-            });
+            // Execute Search directly against the Database
+            let searchResults = await databaseService.searchFiles(client.id, searchQuery);
 
             // Filter by source if required
             if (source === 'GOOGLE_DRIVE') {
@@ -251,8 +183,8 @@ export const fileSearchService = {
             // Prepare Tool Response
             let toolResultContent = "";
             if (searchResults.length > 0) {
-                const topResults = searchResults.slice(0, 5); // Top 5
-                toolResultContent = topResults
+                // Return matches to Gemini
+                toolResultContent = searchResults
                     .map(f => `Source: ${f.source}\nFile: ${f.name}\nSummary/Keywords: ${f.summary}`)
                     .join('\n\n---\n\n');
             } else {
