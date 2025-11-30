@@ -395,7 +395,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="text-center py-2 text-xs text-gray-600 border-t border-gray-800">
-        <p>v1.4.0 (Smart Editor & Telegram Integration)</p>
+        <p>v1.4.1 (Smart Editor)</p>
       </footer>
 
       {isGoogleAuthModalOpen && settings && (

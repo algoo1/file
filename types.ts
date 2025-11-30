@@ -53,10 +53,6 @@ export interface Client {
   airtable_base_id?: string | null;
   airtable_table_id?: string | null;
 
-  // Telegram fields
-  telegram_bot_token?: string | null;
-  telegram_allowed_chat_ids?: string | null; // Comma separated IDs
-
   created_at: string;
   updated_at: string;
   // These are relational fields, hydrated by the application
