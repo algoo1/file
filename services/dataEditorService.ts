@@ -17,7 +17,7 @@ export const dataEditorService = {
         userInstruction: string,
         apiKey: string,
         image?: { data: string; mimeType: string },
-        uploadedImageUrl?: string
+        uploadedFileName?: string
     ): Promise<EditPlan> => {
         const ai = new GoogleGenAI({ apiKey });
 
@@ -29,22 +29,27 @@ Your capability is to manipulate structured data (CSV) based on natural language
 1.  **Multilingual Intelligence:** 
     *   The user may speak in Arabic (e.g., "امسح الوصف"), English ("Clear the description"), French ("Effacer la description"), etc.
     *   The CSV headers might be in a completely different language than the user's command.
-    *   **Task:** You must intelligently map the user's intent to the correct columns and rows, regardless of language mismatches. (e.g., If user says "Change Price" in English, but the column is labeled "السعر" or "Prix", you MUST identify and edit that column).
+    *   **Task:** You must intelligently map the user's intent to the correct columns and rows, regardless of language mismatches.
 
 2.  **Precise Action Logic:**
-    *   **"Add/Link Image":** If an image URL is provided in the prompt context, find the most relevant column (e.g., "Image", "Photo", "Asset", "Link", "Avatar") or **create a new column named "Image"** if none exists. Insert the URL into the specific row identified by the user.
-    *   **"Delete/Remove Text/Cell":** If the user asks to remove specific *content* or a *value* (e.g., "remove the description", "delete the price"), **CLEAR that specific cell** (set to empty string). Do NOT delete the entire row unless explicitly asked.
-    *   **"Delete/Remove Product/Row":** If the user asks to remove an entire *item*, *record*, or *entry* (e.g., "delete the iPhone row", "remove the item with ID 5"), **DELETE the entire row**.
+    *   **"Add/Link Image" (CRITICAL):** 
+        *   If the user has uploaded an image, you will be provided with its **FILENAME**.
+        *   **ACTION:** Insert this **FILENAME** (e.g., "image_12345_shoe.jpg") into the appropriate 'Image', 'Photo', or 'Asset' column. 
+        *   **DO NOT** insert a full URL (like http://...). Just the file name or code.
+        *   If no image column exists, create one named "Image".
+    
+    *   **"Delete/Remove Text/Cell":** Clear the specific cell content. Do NOT delete the row unless asked.
+    *   **"Delete/Remove Product/Row":** Delete the entire row if asked to remove an item/record.
     *   **"Update/Change":** Modify the specific value with high precision.
 
 3.  **Visual Context Awareness:**
-    *   If an image is attached for *analysis* (visual context), use it to identify the product in the CSV (e.g., user uploads a photo of red shoes and says "Change the price of this product"). You must match the visual description to the text data.
+    *   If an image is attached for *analysis* (visual context), use it to identify the product in the CSV.
 
 4.  **Strict Output Format:**
     *   You MUST return a JSON object.
-    *   \`explanation\`: A clear, concise summary of exactly what you changed. **IMPORTANT: Write this explanation in the SAME language the user used in their instruction.**
-    *   \`updatedCsv\`: The complete, valid, raw CSV string representing the new state of the file. Preserve all other data perfectly.
-    *   \`requiresConfirmation\`: true if the request is destructive (deleting > 1 row) or highly ambiguous.
+    *   \`explanation\`: A clear, concise summary of exactly what you changed (in the user's language).
+    *   \`updatedCsv\`: The complete, valid, raw CSV string.
+    *   \`requiresConfirmation\`: true if the request is destructive or ambiguous.
 
 `;
 
@@ -57,12 +62,12 @@ ${originalCsv}
 **User Request:** "${userInstruction}"
 `;
         
-        // Inject the specific logic for the uploaded file link
-        if (uploadedImageUrl) {
+        // Inject the specific logic for the uploaded file NAME
+        if (uploadedFileName) {
             prompt += `\n**SYSTEM EVENT - IMAGE UPLOAD:** 
-The user has uploaded an image to the cloud. 
-**URL:** ${uploadedImageUrl}
-**INSTRUCTION:** You MUST insert this URL into the appropriate Image/Photo column for the product identified in the User Request. If the request implies adding a NEW product, use this URL for its image.
+The user has uploaded an image file.
+**FILENAME:** ${uploadedFileName}
+**INSTRUCTION:** You MUST insert this **FILENAME** ("${uploadedFileName}") into the row identified by the User Request. Use this filename as the reference code.
 `;
         }
 
