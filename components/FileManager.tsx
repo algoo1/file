@@ -9,6 +9,7 @@ import { DocumentIcon } from './icons/DocumentIcon.tsx';
 import { DriveIcon } from './icons/DriveIcon.tsx';
 import { RefreshIcon } from './icons/RefreshIcon.tsx';
 import { ClockIcon } from './icons/ClockIcon.tsx';
+import { CheckCircleIcon } from './icons/CheckCircleIcon.tsx';
 
 interface FileManagerProps {
   client: Client;
@@ -234,7 +235,12 @@ const FileManager: React.FC<FileManagerProps> = ({
                                                     <div className="flex items-center min-w-0">
                                                         <FileTypeIcon type={file.type} source={file.source} />
                                                         <div className="truncate">
-                                                            <span className="text-gray-300 block truncate" title={file.name}>{file.name}</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-gray-300 block truncate" title={file.name}>{file.name}</span>
+                                                                {file.status === 'COMPLETED' && (
+                                                                    <CheckCircleIcon className="w-4 h-4 text-green-500" title="Successfully Uploaded & Synced" />
+                                                                )}
+                                                            </div>
                                                             <span className="text-xs text-gray-500 block truncate">{file.status_message || file.status}</span>
                                                         </div>
                                                     </div>

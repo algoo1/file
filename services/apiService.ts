@@ -4,9 +4,9 @@ import { googleDriveService } from './googleDriveService.ts';
 import { fileSearchService } from './fileSearchService.ts';
 import { SystemSettings, Client, FileObject, SyncedFile, Tag } from '../types.ts';
 
-// User Requirement: Re-upload/Refresh files every 8 days.
-const REFRESH_INTERVAL_DAYS = 8;
-const REFRESH_INTERVAL_MS = REFRESH_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
+// User Requirement: Re-upload/Refresh files every 46 hours.
+const REFRESH_INTERVAL_HOURS = 46;
+const REFRESH_INTERVAL_MS = REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
 
 // Helper for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -71,14 +71,15 @@ export const apiService = {
   },
 
   /**
-   * Performs a Smart Sync with 8-Day Refresh Rule.
+   * Performs a Smart Sync with 46-Hour Refresh Rule.
    * 
    * Logic:
-   * 1. Detect New Files (inc. new folders) -> Sync immediately.
-   * 2. Detect Modified Files (Drive Timestamp) -> Sync immediately.
-   * 3. Detect Stale Files (> 8 days since last sync) -> Re-upload/Re-index.
-   * 4. Detect IDLE/FAILED Files -> Retry them.
-   * 5. Otherwise -> Skip (Efficiency).
+   * 1. Sync existing item from Drive.
+   * 2. Verify if it was uploaded/indexed (Status=COMPLETED).
+   * 3. If uploaded & fresh -> Mark Green (Done).
+   * 4. If not uploaded or IDLE -> Process (Index).
+   * 5. If Modified (Row deleted/changed) -> Re-process from scratch.
+   * 6. If > 46 Hours -> Re-process from scratch.
    */
   syncDataSource: async (
     clientId: string, 
@@ -97,7 +98,7 @@ export const apiService = {
        throw new Error("Google Drive is not configured for this client.");
     }
     
-    // 1. Fetch Fresh Metadata from Google Drive (Recursively scans all folders)
+    // 1. Fetch Fresh Metadata from Google Drive
     let allSourceFilesMeta: (Omit<FileObject, 'content' | 'summary' | 'status' | 'statusMessage'>)[] = [];
 
     try {
@@ -135,7 +136,6 @@ export const apiService = {
     }
 
     // 4. Determine Work (The "Brain" of the operation)
-    // We extend the type here to carry the 'created_at' date through the process
     const filesToProcess: (typeof allSourceFilesMeta[0] & { existingId?: string; created_at: string })[] = [];
     const unchangedFiles: SyncedFile[] = [];
     const initialListPayload: Partial<SyncedFile>[] = [];
@@ -149,42 +149,40 @@ export const apiService = {
         // Preserve original upload time if exists, otherwise it's now.
         const originalUploadTime = existing?.created_at || new Date().toISOString();
         
-        const isNew = !existing;
-        
-        if (isNew) {
+        if (!existing) {
+            // New File -> Upload/Index
             shouldProcess = true;
             reason = 'New file detected.';
-        } else if (existing) {
-            // A. Forced Manual Sync
+        } else {
+            // Existing File Logic
+            const driveTime = sourceFile.source_modified_at ? new Date(sourceFile.source_modified_at).getTime() : 0;
+            const dbTime = existing.source_modified_at ? new Date(existing.source_modified_at).getTime() : 0;
+            const lastSyncTime = existing.last_synced_at ? new Date(existing.last_synced_at).getTime() : 0;
+            const now = Date.now();
+            
+            // Check 1: Modification (Drift tolerance: 1000ms)
+            // If Drive time is significantly different from what we stored, content changed.
+            const isModified = Math.abs(driveTime - dbTime) > 1000;
+
+            // Check 2: 46-Hour Periodic Refresh
+            const isStale = (now - lastSyncTime) > REFRESH_INTERVAL_MS;
+
+            // Check 3: Retry Pending/Failed
+            // Note: We retry 'IDLE' or 'FAILED'. We do NOT interrupt 'SYNCING' to avoid double-processing if the user spams refresh.
+            const isPending = existing.status === 'IDLE' || existing.status === 'FAILED';
+
             if (forceFullResync) {
                 shouldProcess = true;
-                reason = 'Forced re-processing.';
-            }
-            // B. Status Check (Retry IDLE or FAILED)
-            else if (existing.status === 'IDLE' || existing.status === 'FAILED') {
+                reason = 'Forced manual resync.';
+            } else if (isModified) {
                 shouldProcess = true;
-                reason = existing.status === 'FAILED' ? 'Retrying failed file.' : 'Processing pending file.';
-            }
-            // C. Content Modified on Source (Drive)
-            else if (sourceFile.source_modified_at && existing.source_modified_at) {
-                const newTime = new Date(sourceFile.source_modified_at).getTime();
-                const oldTime = new Date(existing.source_modified_at).getTime();
-                // Check if Drive file is newer (allowing for slight clock drift)
-                if (!isNaN(newTime) && !isNaN(oldTime) && Math.abs(newTime - oldTime) > 1000) {
-                    shouldProcess = true;
-                    reason = 'Content modified on Drive.';
-                }
-            } 
-            
-            // D. 8-Day Periodic Refresh Rule
-            // Check database 'last_synced_at' to decide if we need to re-upload
-            if (!shouldProcess && existing.last_synced_at) {
-                const lastSyncTime = new Date(existing.last_synced_at).getTime();
-                const now = Date.now();
-                if ((now - lastSyncTime) > REFRESH_INTERVAL_MS) {
-                    shouldProcess = true;
-                    reason = `Scheduled refresh (${REFRESH_INTERVAL_DAYS} days passed).`;
-                }
+                reason = 'File modified on Google Drive. Re-indexing...';
+            } else if (isStale) {
+                shouldProcess = true;
+                reason = `Periodic refresh (${REFRESH_INTERVAL_HOURS}h passed).`;
+            } else if (isPending) {
+                shouldProcess = true;
+                reason = existing.status === 'FAILED' ? 'Retrying failed file.' : 'Processing new upload.';
             }
         }
 
@@ -204,11 +202,12 @@ export const apiService = {
                 source_modified_at: sourceFile.source_modified_at,
                 id: existing?.id, 
                 status_message: reason,
-                created_at: originalUploadTime, // UI needs this
+                created_at: originalUploadTime,
                 updated_at: new Date().toISOString()
             });
         } else {
             // Unchanged - Do NOT re-sync
+            // This item is "Green Checked" implicitly by having status=COMPLETED and not being in the process list
             unchangedFiles.push(existing!);
             initialListPayload.push(existing!);
         }
@@ -217,10 +216,8 @@ export const apiService = {
     // Notify UI
     onProgress({ type: 'INITIAL_LIST', files: initialListPayload });
 
-    // 5. Process Queue (Download -> Summarize -> Update DB)
-    // CRITICAL: Set to 1 to prevent "RESOURCE_EXHAUSTED" (429) errors from Google Gemini API.
-    // The Free Tier has strict RPM/RPD limits. Serial processing ensures better reliability.
-    const batchSize = 1;
+    // 5. Process Queue
+    const batchSize = 1; // Keep to 1 to respect Rate Limits
     const finalUpdates: Partial<SyncedFile>[] = [];
 
     for (let i = 0; i < filesToProcess.length; i += batchSize) {
@@ -243,16 +240,13 @@ export const apiService = {
 
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing content...' }});
                 
-                // Add a proactive delay before calling AI service to respect rate limits
-                // Free Tier Limit: ~15 RPM (approx every 4s). 
-                // We use 6s to be conservative and avoid hitting the 429 wall.
+                // Rate limit buffer
                 await delay(6000); 
 
                 const fileData = { ...fileMeta, content };
-                // Generate AI Summary
+                // AI Summary
                 finalFileObject = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
                 
-                // Only set success message if status is actually completed
                 if (finalFileObject.status === 'COMPLETED') {
                      finalFileObject.statusMessage = 'Successfully synced.';
                 }
@@ -268,11 +262,12 @@ export const apiService = {
                  };
             }
             
-            // Prepare payload for DB Upsert
             const updatePayload = {
                 ...finalFileObject,
-                status_message: finalFileObject.statusMessage, // Map camelCase to snake_case field explicitly
-                last_synced_at: new Date().toISOString(), // Update sync time
+                status_message: finalFileObject.statusMessage,
+                last_synced_at: new Date().toISOString(), 
+                // CRITICAL: Explicitly set source_modified_at to matches Drive's time to prevent infinite loops
+                source_modified_at: fileMeta.source_modified_at, 
                 created_at: fileMeta.created_at, 
                 id: fileMeta.existingId,
                 client_id: clientId
@@ -287,13 +282,13 @@ export const apiService = {
              source_item_id: f.id,
              name: f.name,
              status: f.status,
-             status_message: f.status_message, // Ensure we use the mapped snake_case property
+             status_message: f.status_message,
              type: f.type,
              source: f.source,
              summary: f.summary,
-             last_synced_at: f.last_synced_at, // Resetting the interval timer
+             last_synced_at: f.last_synced_at,
              source_modified_at: f.source_modified_at,
-             created_at: f.created_at, // Preserving original upload time
+             created_at: f.created_at,
              id: f.id
         })));
     }
@@ -365,7 +360,7 @@ export const apiService = {
               source_modified_at: processed.source_modified_at,
               type: processed.type,
               source: processed.source,
-              created_at: file.created_at // Keeps original creation time
+              created_at: file.created_at 
           };
 
           await databaseService.updateClientFiles(clientId, [updatePayload]);
