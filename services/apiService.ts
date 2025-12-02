@@ -82,9 +82,107 @@ export const apiService = {
        throw new Error("Google Drive is not configured.");
     }
 
-    // --- STRATEGY A: INITIAL FULL SYNC (If no sync token exists or forced) ---
-    // We run the old logic once to populate the DB, then get a token.
-    if (!client.drive_sync_token || forceFullResync) {
+    let performFullSync = !client.drive_sync_token || forceFullResync;
+
+    // --- STRATEGY B: INCREMENTAL SYNC (Try first if we have a token) ---
+    if (!performFullSync) {
+        try {
+            // console.log("Checking for changes since last token...");
+            const { changes, newStartPageToken } = await googleDriveService.getChanges(client.drive_sync_token!);
+
+            if (changes.length > 0) {
+                console.log(`Found ${changes.length} changes.`);
+                const folderId = googleDriveService.getFolderIdFromUrl(client.google_drive_folder_url);
+
+                const idsToDelete: string[] = [];
+                const filesToUpdate: any[] = [];
+
+                for (const change of changes) {
+                    if (change.removed || (change.file && change.file.trashed)) {
+                        idsToDelete.push(change.fileId);
+                        continue;
+                    }
+
+                    const file = change.file;
+                    if (file && 
+                       (file.mimeType.includes('pdf') || file.mimeType.includes('spreadsheet') || file.mimeType.includes('image') || file.mimeType.includes('document'))
+                    ) {
+                         const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
+                            if (mimeType.includes('spreadsheet')) return 'sheet';
+                            if (mimeType.startsWith('image/')) return 'image';
+                            return 'pdf'; 
+                        };
+                        filesToUpdate.push({
+                            id: file.id,
+                            name: file.name,
+                            mimeType: file.mimeType,
+                            type: getFileType(file.mimeType),
+                            source: 'GOOGLE_DRIVE',
+                            source_modified_at: file.modifiedTime
+                        });
+                    }
+                }
+
+                // 1. Process Deletions
+                if (idsToDelete.length > 0) {
+                    console.log("Removing deleted files:", idsToDelete);
+                    await databaseService.deleteClientFilesBySourceId(clientId, idsToDelete);
+                }
+
+                // 2. Process Updates/Adds
+                for (const fileMeta of filesToUpdate) {
+                     try {
+                        onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Detected change. Downloading...' }});
+                        const content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
+                        
+                        onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Re-analyzing...' }});
+                        const fileData = { ...fileMeta, content };
+                        const processed = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
+                        
+                        const existing = client.synced_files.find(f => f.source_item_id === fileMeta.id);
+
+                        await databaseService.updateClientFiles(clientId, [{
+                            id: existing?.id,
+                            client_id: clientId,
+                            source_item_id: processed.id,
+                            name: processed.name,
+                            status: processed.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
+                            status_message: processed.statusMessage || 'Updated via Sync.',
+                            summary: processed.summary,
+                            content: content, 
+                            type: processed.type,
+                            source: 'GOOGLE_DRIVE',
+                            last_synced_at: new Date().toISOString(),
+                            source_modified_at: processed.source_modified_at,
+                            created_at: existing?.created_at || new Date().toISOString(),
+                        }]);
+                        onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'COMPLETED' }});
+
+                    } catch (error) {
+                        console.error(`Incremental Sync Error ${fileMeta.name}:`, error);
+                        await databaseService.updateClientFiles(clientId, [{
+                            client_id: clientId, source_item_id: fileMeta.id, status: 'FAILED', status_message: String(error)
+                        }]);
+                    }
+                }
+            }
+
+            // Save new token
+            await databaseService.updateClient(clientId, { drive_sync_token: newStartPageToken });
+
+        } catch (error: any) {
+            if (error.message === 'INVALID_SYNC_TOKEN') {
+                console.warn("Sync token invalid/expired. Falling back to Full Sync.");
+                performFullSync = true;
+                await databaseService.updateClient(clientId, { drive_sync_token: null });
+            } else {
+                throw error; // Re-throw real errors
+            }
+        }
+    }
+
+    // --- STRATEGY A: INITIAL/FALLBACK FULL SYNC ---
+    if (performFullSync) {
         console.log("Starting Full Sync...");
         const driveFilesMeta = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
         
@@ -115,7 +213,6 @@ export const apiService = {
             await databaseService.deleteClientFiles(filesToDelete.map(f => f.id));
         }
 
-        // Only process NEW or FAILED files during this initial pass to save bandwidth
         const reallyNeedProcessing = filesToProcess.filter(f => {
              const existing = existingFilesMap.get(f.id);
              return !existing || existing.status === 'FAILED';
@@ -158,104 +255,6 @@ export const apiService = {
         }
     } 
     
-    // --- STRATEGY B: INCREMENTAL SYNC (Change Detection) ---
-    else {
-        // console.log("Checking for changes since last token...");
-        const { changes, newStartPageToken } = await googleDriveService.getChanges(client.drive_sync_token);
-
-        if (changes.length === 0) {
-            // No changes? Done.
-            return { client: (await databaseService.getClientById(clientId))! };
-        }
-
-        console.log(`Found ${changes.length} changes.`);
-        const folderId = googleDriveService.getFolderIdFromUrl(client.google_drive_folder_url);
-
-        const idsToDelete: string[] = [];
-        const filesToUpdate: any[] = [];
-
-        for (const change of changes) {
-            // Handle Deletion
-            if (change.removed || (change.file && change.file.trashed)) {
-                idsToDelete.push(change.fileId);
-                continue;
-            }
-
-            // Handle Add/Modify
-            const file = change.file;
-            // Filter: Must be in our target folder tree (Changes API returns everything in drive)
-            // Note: This simple check assumes direct parent. Deep nesting requires more complex logic, 
-            // but for now we check if the file is relevant to our app types.
-            if (file && 
-               (file.mimeType.includes('pdf') || file.mimeType.includes('spreadsheet') || file.mimeType.includes('image') || file.mimeType.includes('document'))
-            ) {
-                 const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-                    if (mimeType.includes('spreadsheet')) return 'sheet';
-                    if (mimeType.startsWith('image/')) return 'image';
-                    return 'pdf'; 
-                };
-                filesToUpdate.push({
-                    id: file.id,
-                    name: file.name,
-                    mimeType: file.mimeType,
-                    type: getFileType(file.mimeType),
-                    source: 'GOOGLE_DRIVE',
-                    source_modified_at: file.modifiedTime
-                });
-            }
-        }
-
-        // 1. Process Deletions
-        if (idsToDelete.length > 0) {
-            console.log("Removing deleted files:", idsToDelete);
-            await databaseService.deleteClientFilesBySourceId(clientId, idsToDelete);
-        }
-
-        // 2. Process Updates/Adds
-        for (const fileMeta of filesToUpdate) {
-             try {
-                // Check if we actually have the folder (Optimization: Fetch only if not in DB or forced)
-                // Actually, for "Changes" API, we blindly update because the API says it changed.
-                
-                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Detected change. Downloading...' }});
-                const content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
-                
-                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Re-analyzing...' }});
-                const fileData = { ...fileMeta, content };
-                const processed = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
-                
-                // We need to fetch the existing ID to update, or create new
-                const existing = client.synced_files.find(f => f.source_item_id === fileMeta.id);
-
-                await databaseService.updateClientFiles(clientId, [{
-                    id: existing?.id,
-                    client_id: clientId,
-                    source_item_id: processed.id,
-                    name: processed.name,
-                    status: processed.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
-                    status_message: processed.statusMessage || 'Updated via Sync.',
-                    summary: processed.summary,
-                    content: content, 
-                    type: processed.type,
-                    source: 'GOOGLE_DRIVE',
-                    last_synced_at: new Date().toISOString(),
-                    source_modified_at: processed.source_modified_at,
-                    created_at: existing?.created_at || new Date().toISOString(),
-                }]);
-                onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'COMPLETED' }});
-
-            } catch (error) {
-                console.error(`Incremental Sync Error ${fileMeta.name}:`, error);
-                await databaseService.updateClientFiles(clientId, [{
-                    client_id: clientId, source_item_id: fileMeta.id, status: 'FAILED', status_message: String(error)
-                }]);
-            }
-        }
-
-        // 3. Save new token so we don't process these changes again
-        await databaseService.updateClient(clientId, { drive_sync_token: newStartPageToken });
-    }
-
     const updatedClient = await databaseService.getClientById(clientId);
     return { client: updatedClient! };
   },

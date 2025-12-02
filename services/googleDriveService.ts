@@ -198,25 +198,34 @@ export const googleDriveService = {
       let allChanges: any[] = [];
       let pageToken = startPageToken;
       
-      // Loop until we have all pages of changes
-      while (true) {
-          const res: any = await gapi.client.drive.changes.list({
-              pageToken: pageToken,
-              fields: 'newStartPageToken, nextPageToken, changes(fileId, removed, file(id, name, mimeType, modifiedTime, parents, trashed))',
-              pageSize: 1000
-          });
-          
-          const changes = res.result.changes || [];
-          allChanges = allChanges.concat(changes);
+      try {
+        // Loop until we have all pages of changes
+        while (true) {
+            const res: any = await gapi.client.drive.changes.list({
+                pageToken: pageToken,
+                fields: 'newStartPageToken, nextPageToken, changes(fileId, removed, file(id, name, mimeType, modifiedTime, parents, trashed))',
+                pageSize: 1000
+            });
+            
+            const changes = res.result.changes || [];
+            allChanges = allChanges.concat(changes);
 
-          if (res.result.nextPageToken) {
-              pageToken = res.result.nextPageToken;
-          } else {
-              return { 
-                  changes: allChanges, 
-                  newStartPageToken: res.result.newStartPageToken 
-              };
+            if (res.result.nextPageToken) {
+                pageToken = res.result.nextPageToken;
+            } else {
+                return { 
+                    changes: allChanges, 
+                    newStartPageToken: res.result.newStartPageToken 
+                };
+            }
+        }
+      } catch (error: any) {
+          // Check for 410 Gone (Token Expired) or 400 (Invalid Token)
+          const errorMsg = JSON.stringify(error);
+          if (errorMsg.includes('410') || errorMsg.includes('StartPageToken is no longer valid') || errorMsg.includes('400')) {
+              throw new Error("INVALID_SYNC_TOKEN");
           }
+          throw error;
       }
   },
 

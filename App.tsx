@@ -34,6 +34,16 @@ const App: React.FC = () => {
   const [isSyncingClient, setIsSyncingClient] = useState<string | null>(null);
   const isAutoSyncingRef = useRef(false);
 
+  // Helper to format errors
+  const formatError = (error: any): string => {
+      if (typeof error === 'string') return error;
+      if (error instanceof Error) return error.message;
+      // Handle Google API Error Objects
+      if (error?.result?.error?.message) return error.result.error.message;
+      if (error?.error?.message) return error.error.message;
+      return JSON.stringify(error);
+  };
+
   // --- Auth & Session Management ---
   useEffect(() => {
     authService.getSession().then(({ data: { session } }) => {
@@ -82,7 +92,7 @@ const App: React.FC = () => {
 
       } catch (error) {
         console.error("Failed to initialize app data:", error);
-        setInitError(`Database connection failed: ${error instanceof Error ? error.message : 'Unknown'}`);
+        setInitError(`Database connection failed: ${formatError(error)}`);
       } finally {
         setIsLoading(false);
       }
@@ -131,21 +141,16 @@ const App: React.FC = () => {
       };
 
       try {
-        // We call syncDataSource.
-        // It now uses drive_sync_token. If no changes on Drive, this returns instantly.
-        // If changes, it processes ONLY the changes.
         const result = await apiService.syncDataSource(selectedClient.id, onProgress, undefined, false);
         handleUpdateClientState(result.client);
       } catch (error) {
-        // Silent error for auto-sync to avoid pestering user
+        // Silent error for auto-sync
         console.error(`[Auto-Sync] Error:`, error);
       } finally {
         isAutoSyncingRef.current = false;
       }
     };
 
-    // Poll frequently (e.g. 10s).
-    // Because we use the "Changes" API token, this is extremely cheap/fast if nothing changed.
     const intervalId = setInterval(syncClientData, 10000);
     return () => clearInterval(intervalId);
   }, [session, selectedClient?.id, selectedClient?.google_drive_folder_url, selectedClient?.drive_sync_token]);
@@ -177,7 +182,7 @@ const App: React.FC = () => {
       setSettings(newSettings);
       setIsGoogleAuthModalOpen(false);
     } catch (error) {
-      alert(`Connection failed: ${error instanceof Error ? error.message : String(error)}`);
+      alert(`Connection failed: ${formatError(error)}`);
       throw error;
     }
   }, []);
@@ -202,7 +207,7 @@ const App: React.FC = () => {
       const result = await apiService.syncSingleFile(clientId, file);
       handleUpdateClientState(result.client);
     } catch (error) {
-      alert(`Sync failed: ${error instanceof Error ? error.message : String(error)}`);
+      alert(`Sync failed: ${formatError(error)}`);
     }
   }, []);
 
@@ -246,7 +251,8 @@ const App: React.FC = () => {
         const result = await apiService.syncDataSource(clientId, onProgress, undefined, forceResync);
         handleUpdateClientState(result.client);
     } catch (error) {
-        alert(`Manual sync failed: ${error}`);
+        console.error("Sync Error:", error);
+        alert(`Manual sync failed: ${formatError(error)}`);
     } finally {
         setIsSyncingClient(null);
     }
