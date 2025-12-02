@@ -69,11 +69,15 @@ const App: React.FC = () => {
           setSelectedClientId(initialClients[0].id);
         }
         
-        // Init Google Drive only if configured.
-        // This will now silently refresh the token if possible.
+        // Init Google Drive if configured.
+        // We now pass the Refresh Token (if it exists) to enable silent auto-auth.
         if (initialSettings.is_google_drive_connected && initialSettings.google_api_key && initialSettings.google_client_id) {
-           await googleDriveService.init(initialSettings.google_api_key, initialSettings.google_client_id)
-            .catch(e => console.warn("Background Drive init:", e));
+           await googleDriveService.init({
+               apiKey: initialSettings.google_api_key, 
+               clientId: initialSettings.google_client_id,
+               clientSecret: initialSettings.google_client_secret || undefined,
+               refreshToken: initialSettings.google_refresh_token || undefined
+           }).catch(e => console.warn("Background Drive init:", e));
         }
 
       } catch (error) {
@@ -127,7 +131,6 @@ const App: React.FC = () => {
       };
 
       try {
-        // We pass 'false' for forceFullResync to rely on smart timestamp checks
         const result = await apiService.syncDataSource(selectedClient.id, onProgress, undefined, false);
         handleUpdateClientState(result.client);
       } catch (error) {
@@ -161,20 +164,18 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleConnectGoogleDrive = useCallback(async (creds: { apiKey: string; clientId: string; }) => {
+  const handleConnectGoogleDrive = useCallback(async (creds: { apiKey: string; clientId: string; clientSecret: string }) => {
     try {
-      await handleSaveSettings({ google_api_key: creds.apiKey, google_client_id: creds.clientId });
       await apiService.connectGoogleDrive(creds);
-      const finalSettings = await apiService.saveSettings({ is_google_drive_connected: true });
-      setSettings(finalSettings);
+      // After connection, we reload settings to ensure UI reflects new state
+      const { settings: newSettings } = await apiService.getInitialData();
+      setSettings(newSettings);
       setIsGoogleAuthModalOpen(false);
     } catch (error) {
-      await apiService.saveSettings({ is_google_drive_connected: false });
-      setSettings(prev => prev ? ({...prev, is_google_drive_connected: false}) : null);
       alert(`Connection failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
-  }, [handleSaveSettings]);
+  }, []);
 
   const handleAddClient = useCallback(async (name: string) => {
     if (name.trim()) {
@@ -208,7 +209,6 @@ const App: React.FC = () => {
     }
 
     setIsSyncingClient(clientId);
-    // Reuse the same onProgress logic as auto-sync (simplified for brevity here)
     const onProgress = (event: any) => {
         setClients(prevClients => 
           prevClients.map(c => {

@@ -58,6 +58,8 @@ export interface SystemSettings {
   file_search_service_api_key: string;
   google_api_key: string | null;
   google_client_id: string | null;
+  google_client_secret: string | null; // NEW: For offline access
+  google_refresh_token: string | null; // NEW: Stored persistently
   is_google_drive_connected: boolean;
 
   created_at: string;

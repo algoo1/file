@@ -21,10 +21,20 @@ export const apiService = {
     return await databaseService.saveSettings(newSettings);
   },
 
-  connectGoogleDrive: async (creds: { apiKey: string, clientId: string }) => {
+  connectGoogleDrive: async (creds: { apiKey: string, clientId: string, clientSecret: string }) => {
     try {
-        await googleDriveService.connect(creds.apiKey, creds.clientId);
-        await databaseService.saveSettings({ is_google_drive_connected: true });
+        // Connect now returns the Refresh Token if successful
+        const refreshToken = await googleDriveService.connect(creds.apiKey, creds.clientId, creds.clientSecret);
+        
+        // Save everything to the database
+        await databaseService.saveSettings({ 
+            is_google_drive_connected: true,
+            google_api_key: creds.apiKey,
+            google_client_id: creds.clientId,
+            google_client_secret: creds.clientSecret,
+            google_refresh_token: refreshToken
+        });
+        
         return { connected: true };
     } catch (error) {
         await databaseService.saveSettings({ is_google_drive_connected: false });
@@ -125,7 +135,7 @@ export const apiService = {
             shouldProcess = true;
             reason = 'New file found.';
         } else {
-            // STRICT Time comparison: Ignore differences less than 5000ms (5s) to account for API clock drifts
+            // STRICT Time comparison
             const driveTime = new Date(sourceFile.source_modified_at || 0).getTime();
             const dbTime = new Date(existing.source_modified_at || 0).getTime();
             const timeDiff = Math.abs(driveTime - dbTime);
@@ -139,7 +149,6 @@ export const apiService = {
                 shouldProcess = true;
                 reason = 'Forced resync.';
             } else if (isBusy) {
-                // If it's currently syncing, DO NOT interrupt or re-add to queue
                 shouldProcess = false; 
             } else if (isModified) {
                 shouldProcess = true;
@@ -168,7 +177,6 @@ export const apiService = {
                 updated_at: new Date().toISOString()
             });
         } else {
-            // Explicitly report as COMPLETED or current status to UI
             initialListPayload.push({
                  ...existing!,
                  status: existing!.status
@@ -184,18 +192,16 @@ export const apiService = {
             onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Downloading...' }});
             
             let content = '';
-            // Always download content for processing
             if (fileMeta.source === 'GOOGLE_DRIVE') {
                 content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
             }
 
             onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing with AI...' }});
-            await delay(2000); // Rate limit smoothing
+            await delay(2000); 
 
             const fileData = { ...fileMeta, content };
             const processed = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
             
-            // Save success state AND CONTENT to Database
             await databaseService.updateClientFiles(clientId, [{
                 client_id: clientId,
                 source_item_id: processed.id,
@@ -203,7 +209,7 @@ export const apiService = {
                 status: processed.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
                 status_message: processed.statusMessage || 'Synced.',
                 summary: processed.summary,
-                content: content, // SAVE FULL DATA
+                content: content, 
                 type: processed.type,
                 source: processed.source,
                 last_synced_at: new Date().toISOString(),
@@ -216,7 +222,7 @@ export const apiService = {
                 source_item_id: processed.id, 
                 status: processed.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED', 
                 status_message: processed.statusMessage,
-                content: content // Send content to UI immediately
+                content: content 
             }});
 
         } catch (error) {
@@ -255,7 +261,6 @@ export const apiService = {
                source: 'GOOGLE_DRIVE' 
            }, settings.file_search_service_api_key);
 
-           // SAVE FULL DATA
            await databaseService.updateClientFiles(clientId, [{
                ...processed,
                client_id: clientId,
