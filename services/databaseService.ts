@@ -6,12 +6,17 @@ import { Client, SystemSettings, SyncedFile, FileObject, Tag } from '../types.ts
 export const databaseService = {
     // Auth & Access Control
     validateInviteCode: async (code: string): Promise<boolean> => {
+        // We use a Remote Procedure Call (RPC) to check the code securely on the server.
         const { data, error } = await supabase
             .rpc('check_invite_code', { lookup_code: code });
         
         if (error) {
-            console.error("Code validation error:", error);
-            return false;
+            console.error("Database Error (validateInviteCode):", error);
+            // Provide a clear hint if the function is missing (User hasn't run the SQL script yet)
+            if (error.message.includes('function') && error.message.includes('does not exist')) {
+                throw new Error("System Error: The 'check_invite_code' function is missing in the database. Please run the SQL setup script.");
+            }
+            throw error;
         }
         return !!data;
     },

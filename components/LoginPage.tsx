@@ -27,19 +27,34 @@ const LoginPage: React.FC = () => {
         }
         
         // 2. Check Code against Database
+        // This step verifies the code exists and hasn't been used.
         const isValid = await databaseService.validateInviteCode(accessCode.trim());
         if (!isValid) {
-            throw new Error("Invalid or used Access Code.");
+            throw new Error("Access Code is invalid or has already been used.");
         }
 
         // 3. Create Account
-        const { error } = await authService.signUp(email, password);
-        if (error) throw error;
-        setMessage("Account created successfully! You are now logged in.");
+        const { data, error: signUpError } = await authService.signUp(email, password);
+        if (signUpError) throw signUpError;
+        
+        // 4. Handle Email Confirmation status
+        if (data.session) {
+            setMessage("Account created successfully! Logging you in...");
+        } else if (data.user && !data.session) {
+            // This happens if "Enable Email Confirmation" is ON in Supabase
+            setMessage("Account created! Please check your email to confirm your account before logging in.");
+            setIsSigningUp(false); // Switch back to login view
+            setAccessCode('');
+        }
       } else {
-        // Sign In (No code required)
+        // Sign In (No code required, code check was done at sign up)
         const { error } = await authService.signIn(email, password);
-        if (error) throw error;
+        if (error) {
+            if (error.message.includes("Invalid login credentials")) {
+                throw new Error("Incorrect email or password.");
+            }
+            throw error;
+        }
       }
     } catch (err: any) {
       setError(err.message || "Authentication failed");
@@ -68,7 +83,7 @@ const LoginPage: React.FC = () => {
 
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-md mb-4 text-sm">
-            {error}
+            <strong>Error:</strong> {error}
           </div>
         )}
         
@@ -105,7 +120,7 @@ const LoginPage: React.FC = () => {
 
           {/* ACCESS CODE INPUT - Only visible during Sign Up */}
           {isSigningUp && (
-             <div className="animate-in fade-in slide-in-from-top-2">
+             <div className="animate-in fade-in slide-in-from-top-2 p-3 bg-blue-900/20 rounded-md border border-blue-500/30">
                 <label className="block text-sm font-bold text-blue-400 mb-1">Access Code</label>
                 <input
                   type="text"
@@ -115,7 +130,9 @@ const LoginPage: React.FC = () => {
                   className="w-full bg-gray-700 text-white rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-blue-500/50"
                   placeholder="Enter your invite code"
                 />
-                <p className="text-xs text-gray-500 mt-1">Required to verify authorization.</p>
+                <p className="text-xs text-gray-400 mt-2">
+                    This code is required to create your account. It will be verified against the database.
+                </p>
              </div>
           )}
 
