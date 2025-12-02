@@ -171,7 +171,6 @@ export const apiService = {
             // Explicitly report as COMPLETED or current status to UI
             initialListPayload.push({
                  ...existing!,
-                 // Ensure status remains what it was (e.g. COMPLETED) if we aren't touching it
                  status: existing!.status
             });
         }
@@ -185,7 +184,7 @@ export const apiService = {
             onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Downloading...' }});
             
             let content = '';
-            // Only download content if we really need it (avoid bandwidth on images if possible, though we summarize images too)
+            // Always download content for processing
             if (fileMeta.source === 'GOOGLE_DRIVE') {
                 content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
             }
@@ -196,7 +195,7 @@ export const apiService = {
             const fileData = { ...fileMeta, content };
             const processed = await fileSearchService.indexSingleFile(client!, fileData, settings.file_search_service_api_key);
             
-            // Save success state
+            // Save success state AND CONTENT to Database
             await databaseService.updateClientFiles(clientId, [{
                 client_id: clientId,
                 source_item_id: processed.id,
@@ -204,6 +203,7 @@ export const apiService = {
                 status: processed.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
                 status_message: processed.statusMessage || 'Synced.',
                 summary: processed.summary,
+                content: content, // SAVE FULL DATA
                 type: processed.type,
                 source: processed.source,
                 last_synced_at: new Date().toISOString(),
@@ -215,7 +215,8 @@ export const apiService = {
             onProgress({ type: 'FILE_UPDATE', update: { 
                 source_item_id: processed.id, 
                 status: processed.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED', 
-                status_message: processed.statusMessage 
+                status_message: processed.statusMessage,
+                content: content // Send content to UI immediately
             }});
 
         } catch (error) {
@@ -236,13 +237,11 @@ export const apiService = {
     return { client: updatedClient! };
   },
 
-  // ... (syncSingleFile remains largely the same, ensures explicit single file sync)
   syncSingleFile: async (clientId: string, file: SyncedFile): Promise<{ client: Client }> => {
       const settings = await databaseService.getSettings();
       let client = await databaseService.getClientById(clientId);
       if (!client || !settings.file_search_service_api_key) throw new Error("Configuration error.");
       
-      // Force sync logic (copy existing single sync implementation)
       try {
            const driveFiles = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
            const currentMeta = driveFiles.find(f => f.id === file.source_item_id);
@@ -256,6 +255,7 @@ export const apiService = {
                source: 'GOOGLE_DRIVE' 
            }, settings.file_search_service_api_key);
 
+           // SAVE FULL DATA
            await databaseService.updateClientFiles(clientId, [{
                ...processed,
                client_id: clientId,
@@ -264,6 +264,8 @@ export const apiService = {
                status_message: 'Manual sync completed.',
                last_synced_at: new Date().toISOString(),
                source_modified_at: processed.source_modified_at,
+               summary: processed.summary,
+               content: content, 
                id: file.id
            }]);
       } catch(e) {

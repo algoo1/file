@@ -12,6 +12,7 @@ export interface SyncedFile {
   type: 'pdf' | 'sheet' | 'image';
   source: 'GOOGLE_DRIVE';
   summary?: string;
+  content?: string; // Stored full content (Text or Base64 for images)
   last_synced_at?: string; // ISO 8601 timestamp
   source_modified_at?: string; // ISO 8601 timestamp from the source
   created_at: string;

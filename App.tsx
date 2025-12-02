@@ -69,9 +69,10 @@ const App: React.FC = () => {
           setSelectedClientId(initialClients[0].id);
         }
         
-        // Init Google Drive only if configured
+        // Init Google Drive only if configured.
+        // This will now silently refresh the token if possible.
         if (initialSettings.is_google_drive_connected && initialSettings.google_api_key && initialSettings.google_client_id) {
-           googleDriveService.init(initialSettings.google_api_key, initialSettings.google_client_id)
+           await googleDriveService.init(initialSettings.google_api_key, initialSettings.google_client_id)
             .catch(e => console.warn("Background Drive init:", e));
         }
 
@@ -130,6 +131,7 @@ const App: React.FC = () => {
         const result = await apiService.syncDataSource(selectedClient.id, onProgress, undefined, false);
         handleUpdateClientState(result.client);
       } catch (error) {
+        // Silent error for auto-sync to avoid pestering user
         console.error(`[Auto-Sync] Error:`, error);
       } finally {
         isAutoSyncingRef.current = false;
@@ -207,7 +209,7 @@ const App: React.FC = () => {
 
     setIsSyncingClient(clientId);
     // Reuse the same onProgress logic as auto-sync (simplified for brevity here)
-    const onProgress = (event: any) => { /* logic duplicated in syncClientData - in production refactor to shared hook */
+    const onProgress = (event: any) => {
         setClients(prevClients => 
           prevClients.map(c => {
               if (c.id === clientId) {

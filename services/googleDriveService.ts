@@ -7,6 +7,7 @@ const SCOPES = 'https://www.googleapis.com/auth/drive';
 let tokenClient: any = null;
 let gapiClientInitialized = false;
 let isInitializing = false;
+let initPromise: Promise<void> | null = null;
 let cachedAccessToken: string | null = null;
 let tokenExpiryTime: number = 0;
 
@@ -34,6 +35,7 @@ const handleTokenResponse = (tokenResponse: any) => {
         cachedAccessToken = tokenResponse.access_token;
         const expiresInMs = (tokenResponse.expires_in || 3599) * 1000;
         tokenExpiryTime = Date.now() + expiresInMs - 300000; // 5 min buffer
+        console.log("Google Drive Token refreshed securely.");
     }
 };
 
@@ -47,15 +49,25 @@ const ensureAccessToken = async (): Promise<void> => {
     console.log("Refreshing Google Token silently...");
     return new Promise((resolve, reject) => {
         try {
+            // We temporarily override the callback for this specific request
+            // This allows us to await the result of the silent refresh
+            const originalCallback = tokenClient.callback;
+            
             tokenClient.callback = (resp: any) => {
-                if (resp.error) reject(new Error("Silent refresh failed"));
-                else {
+                // Restore original callback
+                tokenClient.callback = originalCallback;
+                
+                if (resp.error) {
+                    console.error("Silent refresh failed:", resp);
+                    reject(new Error("Session expired. Please reconnect Google Drive in Settings."));
+                } else {
                     handleTokenResponse(resp);
                     resolve();
                 }
             };
-            // prompt: '' is critical for silent refresh. If it fails, we do NOT switch to 'consent'.
-            // The user must manually click "Reconnect" in settings if this fails.
+            
+            // prompt: '' is critical for silent refresh. 
+            // If the user has approved access before, this returns a token without a popup.
             tokenClient.requestAccessToken({ prompt: '' });
         } catch (err) {
             reject(err);
@@ -65,32 +77,41 @@ const ensureAccessToken = async (): Promise<void> => {
 
 export const googleDriveService = {
   init: async (apiKey: string, clientId: string): Promise<void> => {
-    if (gapiClientInitialized) return;
-    if (isInitializing) return; 
-    isInitializing = true;
+    if (gapiClientInitialized) return Promise.resolve();
+    if (initPromise) return initPromise;
 
-    try {
-        const gapi = await waitForGlobal<any>('gapi');
-        const google = await waitForGlobal<any>('google');
+    initPromise = (async () => {
+        try {
+            const gapi = await waitForGlobal<any>('gapi');
+            const google = await waitForGlobal<any>('google');
 
-        await new Promise<void>((resolve) => gapi.load('client', resolve));
-        await gapi.client.init({ apiKey: apiKey, discoveryDocs: [DISCOVERY_DOC] });
+            await new Promise<void>((resolve) => gapi.load('client', resolve));
+            await gapi.client.init({ apiKey: apiKey, discoveryDocs: [DISCOVERY_DOC] });
 
-        tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: clientId,
-            scope: SCOPES,
-            callback: handleTokenResponse,
-        });
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: clientId,
+                scope: SCOPES,
+                callback: handleTokenResponse,
+            });
 
-        gapiClientInitialized = true;
-        // Attempt one silent load on init
-        try { tokenClient.requestAccessToken({ prompt: '' }); } catch (e) {}
+            gapiClientInitialized = true;
+            
+            // Attempt an immediate silent load to restore session on page reload
+            try { 
+                await ensureAccessToken(); 
+            } catch (e) {
+                console.log("Initial silent auth check: User needs to connect manually once.");
+            }
 
-    } catch (err) {
-        console.error("GAPI Init Error:", err);
-    } finally {
-        isInitializing = false;
-    }
+        } catch (err) {
+            console.error("GAPI Init Error:", err);
+            throw err;
+        } finally {
+            isInitializing = false;
+        }
+    })();
+    
+    return initPromise;
   },
   
   connect: async (apiKey: string, clientId: string): Promise<void> => {
@@ -103,6 +124,7 @@ export const googleDriveService = {
                 resolve();
             }
         };
+        // This triggers the popup (consent). Only needed once.
         tokenClient.requestAccessToken({ prompt: 'consent' });
     });
   },
@@ -116,7 +138,7 @@ export const googleDriveService = {
 
   getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string; modifiedTime: string }[]> => {
     const gapi = window.gapi as any;
-    await ensureAccessToken(); // Will fail here if silent auth fails, preventing loops.
+    await ensureAccessToken();
 
     const folderId = googleDriveService.getFolderIdFromUrl(folderUrl);
     if (!folderId) throw new Error("Invalid URL");
@@ -148,8 +170,7 @@ export const googleDriveService = {
   getFileContent: async (fileId: string, mimeType: string): Promise<string> => {
     const gapi = window.gapi as any;
     await ensureAccessToken();
-    const token = gapi?.client?.getToken(); // Should be set by ensureAccessToken logic if cached
-
+    
     if (mimeType.includes('spreadsheet')) {
         const res = await gapi.client.drive.files.export({ fileId, mimeType: 'text/csv' });
         return res.body;
@@ -170,7 +191,6 @@ export const googleDriveService = {
     return await res.text();
   },
 
-  // ... (updateFileContent, findOrCreateFolder, uploadImageFile logic remains similar but utilizes the shared ensureAccessToken)
   updateFileContent: async (fileId: string, newContent: string, mimeType: string) => {
       await ensureAccessToken();
       const metadata = { mimeType };

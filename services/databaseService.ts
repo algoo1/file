@@ -166,7 +166,7 @@ export const databaseService = {
 
     /**
      * Performs a text search against the SyncedFiles table.
-     * Searches both 'name' and 'summary' fields.
+     * Searches 'name', 'summary', AND the new 'content' field.
      */
     searchFiles: async (clientId: string, query: string): Promise<SyncedFile[]> => {
         // We use ILIKE for case-insensitive partial matching.
@@ -175,7 +175,7 @@ export const databaseService = {
             .from('synced_files')
             .select('*')
             .eq('client_id', clientId)
-            .or(`name.ilike.%${query}%,summary.ilike.%${query}%`)
+            .or(`name.ilike.%${query}%,summary.ilike.%${query}%,content.ilike.%${query}%`)
             .limit(10); // Limit results for context window efficiency
 
         if (error) {
