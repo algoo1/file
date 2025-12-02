@@ -4,6 +4,18 @@ import { Client, SystemSettings, SyncedFile, FileObject, Tag } from '../types.ts
 
 // This service interacts directly with the Supabase database.
 export const databaseService = {
+    // Auth & Access Control
+    validateInviteCode: async (code: string): Promise<boolean> => {
+        const { data, error } = await supabase
+            .rpc('check_invite_code', { lookup_code: code });
+        
+        if (error) {
+            console.error("Code validation error:", error);
+            return false;
+        }
+        return !!data;
+    },
+
     // Settings Management
     getSettings: async (): Promise<SystemSettings> => {
         const { data, error } = await supabase
