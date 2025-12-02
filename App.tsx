@@ -90,7 +90,7 @@ const App: React.FC = () => {
     initializeApp();
   }, [session]); // Runs when session becomes available
 
-  // --- Auto Sync Logic ---
+  // --- Auto Sync Logic (Smart Incremental) ---
   useEffect(() => {
     if (!session || !selectedClient?.google_drive_folder_url) return;
 
@@ -131,6 +131,9 @@ const App: React.FC = () => {
       };
 
       try {
+        // We call syncDataSource.
+        // It now uses drive_sync_token. If no changes on Drive, this returns instantly.
+        // If changes, it processes ONLY the changes.
         const result = await apiService.syncDataSource(selectedClient.id, onProgress, undefined, false);
         handleUpdateClientState(result.client);
       } catch (error) {
@@ -141,9 +144,11 @@ const App: React.FC = () => {
       }
     };
 
+    // Poll frequently (e.g. 10s).
+    // Because we use the "Changes" API token, this is extremely cheap/fast if nothing changed.
     const intervalId = setInterval(syncClientData, 10000);
     return () => clearInterval(intervalId);
-  }, [session, selectedClient?.id, selectedClient?.google_drive_folder_url]);
+  }, [session, selectedClient?.id, selectedClient?.google_drive_folder_url, selectedClient?.drive_sync_token]);
 
 
   // --- Event Handlers ---

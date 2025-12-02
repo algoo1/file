@@ -45,6 +45,7 @@ export interface Client {
   name: string;
   api_key: string;
   google_drive_folder_url: string | null;
+  drive_sync_token: string | null; // NEW: Tracks the "Changes" cursor from Google Drive
 
   created_at: string;
   updated_at: string;

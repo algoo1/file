@@ -30,7 +30,6 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 
 /**
  * Exchanges the Authorization Code for Access & Refresh Tokens.
- * This happens once when the user connects.
  */
 async function exchangeCodeForToken(clientId: string, clientSecret: string, code: string) {
     const params = new URLSearchParams();
@@ -38,7 +37,7 @@ async function exchangeCodeForToken(clientId: string, clientSecret: string, code
     params.append('client_secret', clientSecret);
     params.append('code', code);
     params.append('grant_type', 'authorization_code');
-    params.append('redirect_uri', window.location.origin); // Must match the Origin in Google Console
+    params.append('redirect_uri', window.location.origin); 
 
     const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -56,7 +55,6 @@ async function exchangeCodeForToken(clientId: string, clientSecret: string, code
 
 /**
  * Uses the stored Refresh Token to get a new Access Token.
- * This happens automatically on page load/refresh.
  */
 async function refreshAccessToken(clientId: string, clientSecret: string, refreshToken: string) {
     const params = new URLSearchParams();
@@ -85,7 +83,6 @@ const ensureAccessToken = async (): Promise<void> => {
 
     // 2. If not, try to refresh using the stored Refresh Token
     if (config?.refreshToken && config?.clientSecret) {
-        console.log("Refreshing Google Access Token via Database Credentials...");
         try {
             const tokens = await refreshAccessToken(config.clientId, config.clientSecret, config.refreshToken);
             cachedAccessToken = tokens.access_token;
@@ -104,7 +101,6 @@ const ensureAccessToken = async (): Promise<void> => {
 export const googleDriveService = {
   /**
    * Initializes the GAPI client for API calls.
-   * Loads credentials from the database into memory.
    */
   init: async (creds: { apiKey: string; clientId: string; clientSecret?: string; refreshToken?: string }): Promise<void> => {
     config = {
@@ -121,11 +117,10 @@ export const googleDriveService = {
         gapiClientInitialized = true;
     }
 
-    // Try to ensure we have a token immediately if we have the refresh token
+    // Try to ensure we have a token immediately
     if (config.refreshToken) {
         try {
             await ensureAccessToken();
-            console.log("Google Drive connected seamlessly via stored Refresh Token.");
         } catch (e) {
             console.warn("Could not restore session from refresh token:", e);
         }
@@ -134,10 +129,8 @@ export const googleDriveService = {
   
   /**
    * Triggers the popup to get the initial permissions.
-   * Returns the Refresh Token to be saved in the database.
    */
   connect: async (apiKey: string, clientId: string, clientSecret: string): Promise<string> => {
-    // Re-init with new creds
     await googleDriveService.init({ apiKey, clientId, clientSecret });
     const google = await waitForGlobal<any>('google');
 
@@ -150,7 +143,6 @@ export const googleDriveService = {
                 if (response.code) {
                     try {
                         const tokens = await exchangeCodeForToken(clientId, clientSecret, response.code);
-                        
                         cachedAccessToken = tokens.access_token;
                         const expiresInMs = (tokens.expires_in || 3599) * 1000;
                         tokenExpiryTime = Date.now() + expiresInMs - 30000;
@@ -159,9 +151,7 @@ export const googleDriveService = {
                             config!.refreshToken = tokens.refresh_token;
                             resolve(tokens.refresh_token);
                         } else {
-                            // If user re-authorizes without revoking access first, Google might not send a new refresh token.
-                            // We warn the user or assume existing one works if we had it, but for a "connect" action, it's safer to ask for a fresh one.
-                            console.warn("No refresh token returned. You may have already connected this app.");
+                            console.warn("No refresh token returned.");
                             resolve(''); 
                         }
                     } catch (err) {
@@ -172,8 +162,6 @@ export const googleDriveService = {
                 }
             },
         });
-        
-        // Request offline access to get the Refresh Token
         client.requestCode();
     });
   },
@@ -185,6 +173,56 @@ export const googleDriveService = {
       return urlMatch ? urlMatch[1] : null;
   },
 
+  /**
+   * Gets the "Start Page Token" for tracking changes.
+   * Call this when first syncing a folder to establish a baseline.
+   */
+  getStartPageToken: async (): Promise<string> => {
+      const gapi = window.gapi as any;
+      await ensureAccessToken();
+      gapi.client.setToken({ access_token: cachedAccessToken });
+      
+      const res = await gapi.client.drive.changes.getStartPageToken({});
+      return res.result.startPageToken;
+  },
+
+  /**
+   * Gets a list of changes since the last token.
+   * Efficiently returns only what has changed (added, modified, deleted).
+   */
+  getChanges: async (startPageToken: string): Promise<{ changes: any[], newStartPageToken: string }> => {
+      const gapi = window.gapi as any;
+      await ensureAccessToken();
+      gapi.client.setToken({ access_token: cachedAccessToken });
+
+      let allChanges: any[] = [];
+      let pageToken = startPageToken;
+      
+      // Loop until we have all pages of changes
+      while (true) {
+          const res: any = await gapi.client.drive.changes.list({
+              pageToken: pageToken,
+              fields: 'newStartPageToken, nextPageToken, changes(fileId, removed, file(id, name, mimeType, modifiedTime, parents, trashed))',
+              pageSize: 1000
+          });
+          
+          const changes = res.result.changes || [];
+          allChanges = allChanges.concat(changes);
+
+          if (res.result.nextPageToken) {
+              pageToken = res.result.nextPageToken;
+          } else {
+              return { 
+                  changes: allChanges, 
+                  newStartPageToken: res.result.newStartPageToken 
+              };
+          }
+      }
+  },
+
+  /**
+   * Traditional full list (fallback or initial init)
+   */
   getListOfFiles: async (folderUrl: string): Promise<{ id: string; name: string; mimeType: string; modifiedTime: string }[]> => {
     const gapi = window.gapi as any;
     await ensureAccessToken();
@@ -198,10 +236,7 @@ export const googleDriveService = {
          const q = `'${parentId}' in parents and trashed = false and (mimeType='application/vnd.google-apps.folder' or mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp')`;
 
          do {
-             // We use the gapi client which automatically attaches the access token we just ensured exists
-             // BUT: gapi.client uses its own internal token store. We need to set it manually if we used fetch for refresh.
              gapi.client.setToken({ access_token: cachedAccessToken });
-
             const res: any = await gapi.client.drive.files.list({
                 q: q, fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)', pageSize: 1000, pageToken: pageToken
             });

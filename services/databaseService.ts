@@ -163,6 +163,16 @@ export const databaseService = {
             .in('id', ids);
         if (error) throw error;
     },
+    
+    deleteClientFilesBySourceId: async (clientId: string, sourceItemIds: string[]): Promise<void> => {
+        if (sourceItemIds.length === 0) return;
+        const { error } = await supabase
+            .from('synced_files')
+            .delete()
+            .eq('client_id', clientId)
+            .in('source_item_id', sourceItemIds);
+        if (error) throw error;
+    },
 
     /**
      * Performs a text search against the SyncedFiles table.
