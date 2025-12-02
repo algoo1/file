@@ -2,8 +2,8 @@
 import { FileObject } from '../types.ts';
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-// Added drive.readonly and drive.metadata.readonly to ensure we can list files in folders provided by URL
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly'; 
+// UPDATED SCOPE: 'https://www.googleapis.com/auth/drive' is required to edit files the app didn't create (e.g. user's existing sheets)
+const SCOPES = 'https://www.googleapis.com/auth/drive'; 
 
 let tokenClient: any = null;
 let gapiClientInitialized = false;
@@ -442,9 +442,10 @@ export const googleDriveService = {
   },
 
   /**
-   * Uploads a base64 image to a specific folder and returns the webViewLink.
+   * Uploads a base64 image to a specific folder and returns the webViewLink and ID.
+   * FIX: Returns both ID and Link for DB registration.
    */
-  uploadImageFile: async (parentFolderId: string, fileName: string, base64Data: string, mimeType: string): Promise<string> => {
+  uploadImageFile: async (parentFolderId: string, fileName: string, base64Data: string, mimeType: string): Promise<{ id: string; webViewLink: string }> => {
     const gapi = window.gapi as any;
     await ensureAccessToken();
     const token = gapi?.client?.getToken();
@@ -454,29 +455,30 @@ export const googleDriveService = {
         parents: [parentFolderId]
     };
 
-    // Convert base64 to binary string for the body
+    const boundary = '-------314159265358979323846';
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const close_delim = "\r\n--" + boundary + "--";
+
+    // Convert base64 to binary
     const binaryString = atob(base64Data);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
     }
-    
-    const boundary = 'foo_bar_baz';
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const close_delim = "\r\n--" + boundary + "--";
 
-    // We can't easily concatenate binary data with strings for multipart in standard JS strings without encoding issues.
-    // Instead, we'll use a Blob for the whole body.
-    
-    const metadataBlob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
-    const fileBlob = new Blob([bytes], { type: mimeType });
+    // Construct the multipart body as an array of parts
+    const multipartBody = [
+        delimiter,
+        'Content-Type: application/json\r\n\r\n',
+        JSON.stringify(metadata),
+        delimiter,
+        `Content-Type: ${mimeType}\r\n`,
+        'Content-Transfer-Encoding: binary\r\n\r\n',
+        bytes,
+        close_delim
+    ];
 
-    // Construct the multipart body manually using an Array of parts if fetching
-    // simpler method: use gapi with multipart/related
-    
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', fileBlob);
+    const requestBody = new Blob(multipartBody, { type: `multipart/related; boundary=${boundary}` });
 
     try {
         const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
@@ -484,7 +486,7 @@ export const googleDriveService = {
             headers: {
                 'Authorization': `Bearer ${token.access_token}`
             },
-            body: form
+            body: requestBody
         });
 
         if (!response.ok) {
@@ -493,7 +495,7 @@ export const googleDriveService = {
         }
 
         const result = await response.json();
-        return result.webViewLink; // Returns the shareable link
+        return { id: result.id, webViewLink: result.webViewLink };
     } catch (e: any) {
         throw new Error(`Failed to upload image: ${e.message}`);
     }

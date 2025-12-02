@@ -75,16 +75,24 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
                         const imageCode = `IMG-${Date.now().toString().slice(-6)}.${ext}`;
                         
                         // We still upload to Drive so the file physically exists in the cloud
-                        await googleDriveService.uploadImageFile(
+                        const uploadResult = await googleDriveService.uploadImageFile(
                             imagesFolderId, 
                             imageCode, 
                             selectedImage.data, 
                             selectedImage.mimeType
                         );
+
+                        // CRITICAL: Immediately register this file in the database so the user sees it exists.
+                        // We mark it as 'IDLE' so the main sync loop will pick it up and process it (summary/index).
+                        await apiService.registerUploadedFile(client.id, {
+                            source_item_id: uploadResult.id,
+                            name: imageCode,
+                            type: 'image'
+                        });
                         
                         // We pass this CODE to the AI
                         uploadedFileCode = imageCode;
-                        console.log("Image uploaded. Using Code for CSV:", uploadedFileCode);
+                        console.log("Image uploaded and registered. Using Code for CSV:", uploadedFileCode);
                     }
                 } catch (uploadError) {
                     console.error("Failed to upload image:", uploadError);
@@ -126,7 +134,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ client, fileSearchApiKey, onSyn
             // 1. Update Drive
             await googleDriveService.updateFileContent(file.source_item_id, preview.updatedCsv, 'text/csv');
             
-            // 2. Trigger Sync to update our local index
+            // 2. Trigger Sync to update our local index (and process the newly uploaded image if any)
             await onSyncNow(client.id);
 
             setExecutionStatus('success');

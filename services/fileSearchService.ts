@@ -147,7 +147,7 @@ export const fileSearchService = {
         
         // If query is empty but image exists, provide a default prompt to trigger the analysis
         if (!query.trim() && image) {
-            messageParts.push({ text: "Analyze this image. If it's a product, search the database to check if it is in stock and what the price is." });
+            messageParts.push({ text: "Analyze this image. Identify the product shown (name, type, color, or visible codes). Search the knowledge base for these details to find its price and availability." });
         } else {
             messageParts.push({ text: query });
         }

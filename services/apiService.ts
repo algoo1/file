@@ -52,13 +52,33 @@ export const apiService = {
   },
 
   /**
+   * IMMEDIATELY records a newly uploaded file into the database.
+   * This ensures the user sees the file as "Uploaded" without waiting for the sync loop.
+   */
+  registerUploadedFile: async (clientId: string, fileData: { source_item_id: string, name: string, type: 'image' }) => {
+      const newFile: Partial<SyncedFile> = {
+          client_id: clientId,
+          source_item_id: fileData.source_item_id,
+          name: fileData.name,
+          type: fileData.type,
+          source: 'GOOGLE_DRIVE',
+          status: 'IDLE', // Mark as IDLE so syncDataSource picks it up for indexing
+          status_message: 'Upload completed. Waiting for indexing...',
+          source_modified_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
+      };
+      await databaseService.updateClientFiles(clientId, [newFile]);
+  },
+
+  /**
    * Performs a Smart Sync with 8-Day Refresh Rule.
    * 
    * Logic:
    * 1. Detect New Files (inc. new folders) -> Sync immediately.
    * 2. Detect Modified Files (Drive Timestamp) -> Sync immediately.
    * 3. Detect Stale Files (> 8 days since last sync) -> Re-upload/Re-index.
-   * 4. Otherwise -> Skip (Efficiency).
+   * 4. Detect IDLE/FAILED Files -> Retry them.
+   * 5. Otherwise -> Skip (Efficiency).
    */
   syncDataSource: async (
     clientId: string, 
@@ -140,7 +160,12 @@ export const apiService = {
                 shouldProcess = true;
                 reason = 'Forced re-processing.';
             }
-            // B. Content Modified on Source (Drive)
+            // B. Status Check (Retry IDLE or FAILED)
+            else if (existing.status === 'IDLE' || existing.status === 'FAILED') {
+                shouldProcess = true;
+                reason = existing.status === 'FAILED' ? 'Retrying failed file.' : 'Processing pending file.';
+            }
+            // C. Content Modified on Source (Drive)
             else if (sourceFile.source_modified_at && existing.source_modified_at) {
                 const newTime = new Date(sourceFile.source_modified_at).getTime();
                 const oldTime = new Date(existing.source_modified_at).getTime();
@@ -151,7 +176,7 @@ export const apiService = {
                 }
             } 
             
-            // C. 8-Day Periodic Refresh Rule
+            // D. 8-Day Periodic Refresh Rule
             // Check database 'last_synced_at' to decide if we need to re-upload
             if (!shouldProcess && existing.last_synced_at) {
                 const lastSyncTime = new Date(existing.last_synced_at).getTime();
@@ -219,9 +244,9 @@ export const apiService = {
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing content...' }});
                 
                 // Add a proactive delay before calling AI service to respect rate limits
-                // Free Tier Limit: ~15 RPM = 1 request every 4 seconds.
-                // We pause for 4000ms to be safe.
-                await delay(4000); 
+                // Free Tier Limit: ~15 RPM (approx every 4s). 
+                // We use 6s to be conservative and avoid hitting the 429 wall.
+                await delay(6000); 
 
                 const fileData = { ...fileMeta, content };
                 // Generate AI Summary
@@ -246,6 +271,7 @@ export const apiService = {
             // Prepare payload for DB Upsert
             const updatePayload = {
                 ...finalFileObject,
+                status_message: finalFileObject.statusMessage, // Map camelCase to snake_case field explicitly
                 last_synced_at: new Date().toISOString(), // Update sync time
                 created_at: fileMeta.created_at, 
                 id: fileMeta.existingId,
@@ -261,7 +287,7 @@ export const apiService = {
              source_item_id: f.id,
              name: f.name,
              status: f.status,
-             status_message: f.statusMessage,
+             status_message: f.status_message, // Ensure we use the mapped snake_case property
              type: f.type,
              source: f.source,
              summary: f.summary,

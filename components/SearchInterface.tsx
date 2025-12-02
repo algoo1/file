@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef } from 'react';
 import { Client } from '../types.ts';
 import { SearchIcon } from './icons/SearchIcon.tsx';
@@ -17,18 +18,50 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<{ data: string; mimeType: string } | null>(null);
   const [searchSource, setSearchSource] = useState<SearchSource>('ALL');
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processFile = (file: File) => {
+    if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = (reader.result as string).split(',')[1];
+          setSelectedImage({ data: base64String, mimeType: file.type });
+        };
+        reader.readAsDataURL(file);
+    }
+  };
 
   const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        setSelectedImage({ data: base64String, mimeType: file.type });
-      };
-      reader.readAsDataURL(file);
+    if (file) processFile(file);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (const item of items) {
+      if (item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile();
+        if (file) processFile(file);
+      }
     }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file) processFile(file);
   };
 
   const handleSearch = useCallback(async (e: React.FormEvent) => {
@@ -69,14 +102,24 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
   );
 
   return (
-    <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
+    <div 
+        className={`rounded-lg p-6 border transition-all duration-200 shadow-lg
+            ${isDragging ? 'bg-gray-800/80 border-blue-500 ring-2 ring-blue-500/20' : 'bg-gray-800 border-gray-700'}
+        `}
+        onPaste={handlePaste}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        tabIndex={0} // Allows div to capture paste events when focused/clicked
+    >
        <div className="flex items-center gap-3 mb-2">
         <SearchIcon className="w-6 h-6 text-green-400" />
         <h2 className="text-xl font-semibold text-white">Test Search API</h2>
       </div>
       <p className="text-sm text-gray-400 mb-4">
-        Use this form to test the search functionality. You can ask a question, upload an image, or both to query the indexed data from all connected data sources.
-        Supports Arabic, English, French, and other major languages.
+        Ask a question or <span className="text-blue-400 font-semibold">Paste / Drag & Drop an image</span> to search your inventory.
+        <br/>
+        <span className="text-xs text-gray-500">Supports multilingual queries (Arabic, English, French, etc).</span>
       </p>
 
       <form onSubmit={handleSearch}>
@@ -87,7 +130,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
         </div>
 
         {selectedImage && (
-            <div className="mb-4 relative w-48 h-48 border-2 border-dashed border-gray-600 rounded-lg p-2">
+            <div className="mb-4 relative w-48 h-48 border-2 border-dashed border-gray-600 rounded-lg p-2 bg-gray-900/50 group">
                 <img src={`data:${selectedImage.mimeType};base64,${selectedImage.data}`} alt="Search preview" className="w-full h-full object-contain rounded-md" />
                 <button
                     type="button"
@@ -95,12 +138,18 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
                         setSelectedImage(null);
                         if (fileInputRef.current) fileInputRef.current.value = '';
                     }}
-                    className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-black/80"
+                    className="absolute top-2 right-2 bg-black/60 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center transition-colors"
                     title="Remove image"
                 >
                     &times;
                 </button>
             </div>
+        )}
+
+        {isDragging && (
+             <div className="mb-4 p-8 border-2 border-dashed border-blue-400 bg-blue-500/10 rounded-lg text-center">
+                 <p className="text-blue-300 font-bold animate-pulse">Drop image to attach</p>
+             </div>
         )}
 
         <div className="flex flex-col sm:flex-row gap-2">
@@ -109,7 +158,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
                 dir="auto"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={hasDataSource ? `Ask a question (Arabic, English, French, etc.)` : "Please connect a data source first."}
+                placeholder={hasDataSource ? `Ask a question (e.g., "Is this in stock?")` : "Please connect a data source first."}
                 className="flex-grow bg-gray-700 text-white rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
                 disabled={isLoading || !hasDataSource}
             />
@@ -117,16 +166,17 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
             <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
+                className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed whitespace-nowrap"
                 disabled={isLoading || !hasDataSource}
+                title="Upload Image"
             >
                 <ImageIcon className="w-5 h-5 mr-2" />
-                {selectedImage ? 'Change Image' : 'Add Image'}
+                {selectedImage ? 'Change' : 'Add Image'}
             </button>
-             <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed min-w-[120px]" disabled={!canSearch}>
+             <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md flex items-center justify-center transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed min-w-[120px]" disabled={!canSearch}>
                 {isLoading ? (
                     <>
-                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
@@ -138,8 +188,16 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ client, onSearch }) =
       </form>
 
       {(isLoading || result) && (
-        <div className="bg-gray-900/50 p-4 rounded-md mt-4 border border-gray-700">
-            {isLoading && <p className="text-gray-400">Searching...</p>}
+        <div className="bg-gray-900/50 p-4 rounded-md mt-4 border border-gray-700 animate-in fade-in slide-in-from-top-2">
+            {isLoading && (
+                 <div className="flex items-center gap-3 text-gray-400">
+                     <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                    </span>
+                    <p className="text-sm">Analyzing request...</p>
+                 </div>
+            )}
             {result && (
                 <div className="text-gray-300 whitespace-pre-wrap prose prose-invert prose-sm max-w-none" dir="auto">
                     <p>{result}</p>
