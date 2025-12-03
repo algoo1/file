@@ -12,7 +12,7 @@ export const databaseService = {
         
         if (error) {
             console.error("Database Error (validateInviteCode):", error);
-            // Provide a clear hint if the function is missing (User hasn't run the SQL script yet)
+            // Provide a clear hint if the function is missing (User hasn't run the SQL setup script yet)
             if (error.message.includes('function') && error.message.includes('does not exist')) {
                 throw new Error("System Error: The 'check_invite_code' function is missing in the database. Please run the SQL setup script.");
             }
@@ -59,35 +59,75 @@ export const databaseService = {
 
     // Client Management with Relations
     getClients: async (): Promise<Client[]> => {
-        const { data, error } = await supabase
+        // 1. Fetch Clients
+        const { data: clients, error: clientsError } = await supabase
             .from('clients')
-            .select(`
-                *,
-                synced_files (*),
-                tags (*)
-            `)
+            .select('*')
             .order('created_at', { ascending: true });
 
-        if (error) throw error;
-        return data as Client[];
+        if (clientsError) throw clientsError;
+        if (!clients || clients.length === 0) return [];
+
+        // 2. Fetch related data manually to avoid PGRST200 (missing Foreign Key metadata)
+        const clientIds = clients.map(c => c.id);
+        
+        const { data: files, error: filesError } = await supabase
+            .from('synced_files')
+            .select('*')
+            .in('client_id', clientIds);
+            
+        if (filesError) throw filesError;
+
+        const { data: tags, error: tagsError } = await supabase
+            .from('tags')
+            .select('*')
+            .in('client_id', clientIds);
+            
+        if (tagsError) throw tagsError;
+
+        // 3. Merge data locally
+        return clients.map(client => ({
+            ...client,
+            synced_files: (files || []).filter(f => f.client_id === client.id),
+            tags: (tags || []).filter(t => t.client_id === client.id)
+        }));
     },
+    
     getClientById: async (id: string): Promise<Client | undefined> => {
-        const { data, error } = await supabase
+        // 1. Fetch Client
+        const { data: client, error: clientError } = await supabase
             .from('clients')
-            .select(`
-                *,
-                synced_files (*),
-                tags (*)
-            `)
+            .select('*')
             .eq('id', id)
             .single();
         
-        if (error) {
-            if(error.code === 'PGRST116') return undefined; // Not found is not an error
-            throw error;
+        if (clientError) {
+            if(clientError.code === 'PGRST116') return undefined; // Not found
+            throw clientError;
         }
-        return data as Client;
+
+        // 2. Fetch related data manually
+        const { data: files, error: filesError } = await supabase
+            .from('synced_files')
+            .select('*')
+            .eq('client_id', id);
+
+        if (filesError) throw filesError;
+
+        const { data: tags, error: tagsError } = await supabase
+            .from('tags')
+            .select('*')
+            .eq('client_id', id);
+
+        if (tagsError) throw tagsError;
+
+        return {
+            ...client,
+            synced_files: files || [],
+            tags: tags || []
+        } as Client;
     },
+
     addClient: async (name: string): Promise<Client> => {
         const apiKey = `sk-${crypto.randomUUID().replace(/-/g, '')}`;
         const { data, error } = await supabase
