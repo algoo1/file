@@ -172,6 +172,41 @@ export const googleDriveService = {
       const urlMatch = url.match(/drive\/[a-z]+\/([a-zA-Z0-9_-]+)/);
       return urlMatch ? urlMatch[1] : null;
   },
+  
+  /**
+   * Validates the connection by attempting to fetch metadata.
+   * Used for the "Sync Light" indicator. Returns true if connection is active.
+   */
+  validateConnection: async (folderUrl?: string): Promise<boolean> => {
+      try {
+          // If we can't even get a token, we are definitely disconnected
+          try {
+             await ensureAccessToken();
+          } catch {
+             return false;
+          }
+          
+          const gapi = window.gapi as any;
+          gapi.client.setToken({ access_token: cachedAccessToken });
+
+          if (folderUrl) {
+              const folderId = googleDriveService.getFolderIdFromUrl(folderUrl);
+              if (!folderId) return false;
+              // Specific check for the folder availability
+              await gapi.client.drive.files.get({ 
+                  fileId: folderId, 
+                  fields: 'id, trashed' 
+              });
+          } else {
+             // Generic check to see if API is reachable
+             await gapi.client.drive.about.get({ fields: 'user' });
+          }
+          return true;
+      } catch (e) {
+          // 404, 403, 401 or Network Error will land here
+          return false;
+      }
+  },
 
   /**
    * Gets the "Start Page Token" for tracking changes.
@@ -244,8 +279,6 @@ export const googleDriveService = {
          let pageToken = null;
          
          // PERMISSIVE QUERY: Retrieve ALL files in the folder (trashed=false).
-         // We do NOT filter by mimeType here to avoid missing valid files that Google has mislabeled.
-         // We filter strictly in the application code instead.
          const q = `'${parentId}' in parents and trashed = false`;
 
          do {

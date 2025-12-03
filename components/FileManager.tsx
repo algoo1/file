@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Client, SyncedFile, Tag } from '../types.ts';
+import { googleDriveService } from '../services/googleDriveService.ts';
 import { PlusIcon } from './icons/PlusIcon.tsx';
 import { EyeIcon } from './icons/EyeIcon.tsx';
 import { ImageIcon } from './icons/ImageIcon.tsx';
@@ -139,6 +140,36 @@ const FileManager: React.FC<FileManagerProps> = ({
   const [newTagName, setNewTagName] = useState('');
   const [viewingFile, setViewingFile] = useState<SyncedFile | null>(null);
   const [syncingFileId, setSyncingFileId] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'active' | 'inactive'>('inactive');
+
+  // Real-time connectivity polling
+  useEffect(() => {
+    let active = true;
+    const checkConnection = async () => {
+        // If basic config is missing, we are inactive
+        if (!isGoogleDriveConnected || !client.google_drive_folder_url) {
+            if (active) setConnectionStatus('inactive');
+            return;
+        }
+
+        // Perform real API pulse check
+        const isAlive = await googleDriveService.validateConnection(client.google_drive_folder_url);
+        if (active) {
+            setConnectionStatus(isAlive ? 'active' : 'inactive');
+        }
+    };
+
+    // Initial check
+    checkConnection();
+
+    // Poll every 15 seconds to verify connection is still alive
+    const intervalId = setInterval(checkConnection, 15000);
+
+    return () => {
+        active = false;
+        clearInterval(intervalId);
+    };
+  }, [client.google_drive_folder_url, isGoogleDriveConnected]);
 
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,7 +188,7 @@ const FileManager: React.FC<FileManagerProps> = ({
   };
   
   const hasDataSource = !!client.google_drive_folder_url;
-  const isConnected = isGoogleDriveConnected && hasDataSource;
+  const isGreen = connectionStatus === 'active';
 
   return (
     <>
@@ -189,11 +220,11 @@ const FileManager: React.FC<FileManagerProps> = ({
                         {/* Status Light Indicator */}
                         <div 
                             className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                                isConnected 
+                                isGreen 
                                 ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' 
                                 : 'bg-red-500 shadow-[0_0_10px_#ef4444]'
                             }`}
-                            title={isConnected ? "Connection Status: Active" : "Connection Status: Disconnected"}
+                            title={isGreen ? "Connection Status: Verified & Active" : "Connection Status: Disconnected or Unreachable"}
                         />
                     </div>
                     
