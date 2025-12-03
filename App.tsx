@@ -110,28 +110,40 @@ const App: React.FC = () => {
 
       isAutoSyncingRef.current = true;
 
-      const onProgress = (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => {
+      const onProgress = (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } } | { type: 'FILE_DELETE', source_item_id: string }) => {
            setClients(prevClients => 
               prevClients.map(c => {
                   if (c.id === selectedClient.id) {
-                      let updatedFiles: SyncedFile[];
+                      let updatedFiles = [...c.synced_files];
+
                       if (event.type === 'INITIAL_LIST') {
-                          updatedFiles = event.files.map(f => {
-                              const existing = c.synced_files.find(ef => ef.source_item_id === f.source_item_id);
-                              return {
-                                ...(existing || {}),
-                                ...f,
-                                id: f.id || existing?.id || crypto.randomUUID(), 
-                                client_id: selectedClient.id,
-                                status: f.status || 'IDLE',
-                                created_at: existing?.created_at || new Date().toISOString(),
-                                updated_at: new Date().toISOString(),
-                              } as SyncedFile;
+                          // Merge list: Update existing, Add new
+                          event.files.forEach(f => {
+                              const idx = updatedFiles.findIndex(ef => ef.source_item_id === f.source_item_id);
+                              if (idx >= 0) {
+                                  updatedFiles[idx] = { ...updatedFiles[idx], ...f } as SyncedFile;
+                              } else {
+                                  updatedFiles.push({
+                                      ...f,
+                                      id: f.id || crypto.randomUUID(),
+                                      client_id: selectedClient.id,
+                                      status: f.status || 'IDLE',
+                                      created_at: new Date().toISOString(),
+                                      updated_at: new Date().toISOString(),
+                                  } as SyncedFile);
+                              }
                           });
-                      } else {
-                          updatedFiles = c.synced_files.map(f =>
-                              f.source_item_id === event.update.source_item_id ? { ...f, ...event.update } : f
-                          );
+                      } 
+                      else if (event.type === 'FILE_DELETE') {
+                          // Remove file from list
+                          updatedFiles = updatedFiles.filter(f => f.source_item_id !== event.source_item_id);
+                      }
+                      else if (event.type === 'FILE_UPDATE') {
+                          // Update specific file
+                           const idx = updatedFiles.findIndex(ef => ef.source_item_id === event.update.source_item_id);
+                           if (idx >= 0) {
+                               updatedFiles[idx] = { ...updatedFiles[idx], ...event.update } as SyncedFile;
+                           }
                       }
                       return { ...c, synced_files: updatedFiles };
                   }
@@ -219,26 +231,36 @@ const App: React.FC = () => {
     }
 
     setIsSyncingClient(clientId);
+    // Reuse the same logic for progress updates
     const onProgress = (event: any) => {
         setClients(prevClients => 
           prevClients.map(c => {
               if (c.id === clientId) {
-                  let updatedFiles: SyncedFile[];
+                  let updatedFiles = [...c.synced_files];
+
                   if (event.type === 'INITIAL_LIST') {
-                      updatedFiles = event.files.map((f: any) => {
-                          const existing = c.synced_files.find(ef => ef.source_item_id === f.source_item_id);
-                          return {
-                            ...(existing || {}),
-                            ...f,
-                            id: f.id || existing?.id || crypto.randomUUID(), 
-                            client_id: clientId,
-                            status: f.status || 'IDLE',
-                          } as SyncedFile;
+                      event.files.forEach((f: any) => {
+                          const idx = updatedFiles.findIndex(ef => ef.source_item_id === f.source_item_id);
+                          if (idx >= 0) {
+                              updatedFiles[idx] = { ...updatedFiles[idx], ...f };
+                          } else {
+                              updatedFiles.push({
+                                  ...f,
+                                  id: f.id || crypto.randomUUID(),
+                                  client_id: clientId,
+                                  status: f.status || 'IDLE',
+                              } as SyncedFile);
+                          }
                       });
-                  } else {
-                      updatedFiles = c.synced_files.map(f =>
-                          f.source_item_id === event.update.source_item_id ? { ...f, ...event.update } : f
-                      );
+                  } 
+                  else if (event.type === 'FILE_DELETE') {
+                      updatedFiles = updatedFiles.filter(f => f.source_item_id !== event.source_item_id);
+                  }
+                  else if (event.type === 'FILE_UPDATE') {
+                       const idx = updatedFiles.findIndex(ef => ef.source_item_id === event.update.source_item_id);
+                       if (idx >= 0) {
+                           updatedFiles[idx] = { ...updatedFiles[idx], ...event.update };
+                       }
                   }
                   return { ...c, synced_files: updatedFiles };
               }

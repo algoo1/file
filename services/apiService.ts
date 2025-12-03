@@ -69,7 +69,7 @@ export const apiService = {
 
   syncDataSource: async (
     clientId: string, 
-    onProgress: (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } }) => void,
+    onProgress: (event: { type: 'INITIAL_LIST', files: Partial<SyncedFile>[] } | { type: 'FILE_UPDATE', update: Partial<SyncedFile> & { source_item_id: string } } | { type: 'FILE_DELETE', source_item_id: string }) => void,
     limitSource?: 'GOOGLE_DRIVE',
     forceFullResync?: boolean
   ): Promise<{ client: Client }> => {
@@ -105,10 +105,10 @@ export const apiService = {
 
                     const file = change.file;
                     if (file && 
-                       (file.mimeType.includes('pdf') || file.mimeType.includes('spreadsheet') || file.mimeType.includes('image') || file.mimeType.includes('document'))
+                       (file.mimeType.includes('pdf') || file.mimeType.includes('spreadsheet') || file.mimeType.includes('image') || file.mimeType.includes('document') || file.mimeType.includes('csv') || file.mimeType.includes('excel'))
                     ) {
                          const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-                            if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'sheet';
+                            if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'sheet';
                             if (mimeType.startsWith('image/')) return 'image';
                             return 'pdf'; 
                         };
@@ -127,15 +127,28 @@ export const apiService = {
                 if (idsToDelete.length > 0) {
                     console.log("Removing deleted files:", idsToDelete);
                     await databaseService.deleteClientFilesBySourceId(clientId, idsToDelete);
+                    // Instant UI update
+                    idsToDelete.forEach(id => onProgress({ type: 'FILE_DELETE', source_item_id: id }));
                 }
 
                 // 2. Process Updates/Adds
                 for (const fileMeta of filesToUpdate) {
                      try {
                         onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Detected change. Downloading...' }});
+                        
+                        // Persist "SYNCING" status to DB so it survives refresh
+                        await databaseService.updateClientFiles(clientId, [{
+                            client_id: clientId, source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Syncing...'
+                        }]);
+
                         const content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
                         
                         onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Re-analyzing...' }});
+                        // Persist "INDEXING" status
+                         await databaseService.updateClientFiles(clientId, [{
+                            client_id: clientId, source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Indexing...'
+                        }]);
+
                         const fileData = { ...fileMeta, content };
                         const processed = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
                         
@@ -163,6 +176,7 @@ export const apiService = {
                         await databaseService.updateClientFiles(clientId, [{
                             client_id: clientId, source_item_id: fileMeta.id, status: 'FAILED', status_message: String(error)
                         }]);
+                        onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'FAILED' }});
                     }
                 }
             }
@@ -187,11 +201,10 @@ export const apiService = {
         const driveFilesMeta = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
         
         // 1. Get a baseline token for FUTURE changes, but DO NOT save it yet.
-        // We only save it if we successfully process the files.
         const startPageToken = await googleDriveService.getStartPageToken();
 
         const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-            if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'sheet';
+            if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'sheet';
             if (mimeType.startsWith('image/')) return 'image';
             return 'pdf'; 
         };
@@ -209,8 +222,11 @@ export const apiService = {
         const existingFilesMap = new Map(client.synced_files.map(f => [f.source_item_id, f]));
         const sourceIds = new Set(filesToProcess.map(f => f.id));
         const filesToDelete = client.synced_files.filter(f => !sourceIds.has(f.source_item_id));
+        
         if (filesToDelete.length > 0) {
             await databaseService.deleteClientFiles(filesToDelete.map(f => f.id));
+             // Instant UI update
+            filesToDelete.forEach(f => onProgress({ type: 'FILE_DELETE', source_item_id: f.source_item_id }));
         }
 
         const reallyNeedProcessing = filesToProcess.filter(f => {
@@ -226,16 +242,24 @@ export const apiService = {
         for (const fileMeta of reallyNeedProcessing) {
             try {
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Downloading...' }});
-                
+                // Persist status
+                 await databaseService.updateClientFiles(clientId, [{
+                    client_id: clientId, source_item_id: fileMeta.id, status: 'SYNCING', status_message: 'Downloading...'
+                }]);
+
                 const content = await googleDriveService.getFileContent(fileMeta.id, fileMeta.mimeType);
                 
                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing...' }});
-                await delay(1000);
+                // Persist status
+                await databaseService.updateClientFiles(clientId, [{
+                    client_id: clientId, source_item_id: fileMeta.id, status: 'INDEXING', status_message: 'Analyzing...'
+                }]);
+                
+                await delay(1000); // Small visual delay to show progress
 
                 const fileData = { ...fileMeta, content };
                 const processed = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
                 
-                // Get existing DB ID to update record instead of creating duplicate
                 const existing = existingFilesMap.get(fileMeta.id);
 
                 await databaseService.updateClientFiles(clientId, [{
@@ -260,12 +284,11 @@ export const apiService = {
                 await databaseService.updateClientFiles(clientId, [{
                     client_id: clientId, source_item_id: fileMeta.id, status: 'FAILED', status_message: String(error)
                 }]);
+                 onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'FAILED' }});
             }
         }
         
         // CRITICAL: Only save the token if we made it to the end.
-        // If the loop above throws or crashes, this line is never reached.
-        // This ensures the next sync starts from scratch (Full Sync) rather than skipping files.
         await databaseService.updateClient(clientId, { drive_sync_token: startPageToken });
         console.log("Full sync complete. Token saved.");
     } 
@@ -284,6 +307,10 @@ export const apiService = {
            const currentMeta = driveFiles.find(f => f.id === file.source_item_id);
            if(!currentMeta) throw new Error("File not found on Drive.");
            
+           await databaseService.updateClientFiles(clientId, [{
+               id: file.id, client_id: clientId, source_item_id: file.source_item_id, status: 'SYNCING', status_message: 'Starting sync...'
+           }]);
+
            const content = await googleDriveService.getFileContent(file.source_item_id, currentMeta.mimeType);
            const processed = await fileSearchService.indexSingleFile(client!, {
                ...currentMeta, 
