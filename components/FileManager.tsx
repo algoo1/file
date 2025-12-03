@@ -157,6 +157,7 @@ const FileManager: React.FC<FileManagerProps> = ({
   };
   
   const hasDataSource = !!client.google_drive_folder_url;
+  const isConnected = isGoogleDriveConnected && hasDataSource;
 
   return (
     <>
@@ -181,12 +182,24 @@ const FileManager: React.FC<FileManagerProps> = ({
             
             <div className="border-t border-gray-700 pt-4 mt-4">
                 <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-md font-semibold text-gray-300 flex items-center gap-2">
-                        Status & Sync
-                        <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full flex items-center gap-1 font-normal">
-                             <ClockIcon className="w-3 h-3" /> Auto (10s)
-                        </span>
-                    </h3>
+                    <div className="flex items-center gap-3">
+                        <h3 className="text-md font-semibold text-gray-300">
+                            Status & Sync
+                        </h3>
+                        {/* Status Light Indicator */}
+                        <div 
+                            className={`w-3 h-3 rounded-full transition-all duration-500 ${
+                                isConnected 
+                                ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' 
+                                : 'bg-red-500 shadow-[0_0_10px_#ef4444]'
+                            }`}
+                            title={isConnected ? "Connection Status: Active" : "Connection Status: Disconnected"}
+                        />
+                    </div>
+                    
+                    <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full flex items-center gap-1 font-normal">
+                            <ClockIcon className="w-3 h-3" /> Auto (10s)
+                    </span>
                 </div>
                 
                 <div className="flex gap-2 mb-3">
