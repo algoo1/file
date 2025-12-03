@@ -242,8 +242,11 @@ export const googleDriveService = {
     const fetchRecursively = async (parentId: string): Promise<any[]> => {
          let allFiles: any[] = [];
          let pageToken = null;
-         // Broadened Query: Included MS Office formats (.xlsx, .docx, .xls) and CSV
-         const q = `'${parentId}' in parents and trashed = false and (mimeType='application/vnd.google-apps.folder' or mimeType='application/pdf' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='text/csv' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='image/jpeg' or mimeType='image/png' or mimeType='image/webp' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document' or mimeType='application/vnd.ms-excel')`;
+         
+         // PERMISSIVE QUERY: Retrieve ALL files in the folder (trashed=false).
+         // We do NOT filter by mimeType here to avoid missing valid files that Google has mislabeled.
+         // We filter strictly in the application code instead.
+         const q = `'${parentId}' in parents and trashed = false`;
 
          do {
              gapi.client.setToken({ access_token: cachedAccessToken });
@@ -251,7 +254,12 @@ export const googleDriveService = {
                 q: q, fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)', pageSize: 1000, pageToken: pageToken
             });
             const items = res.result.files || [];
-            const files = items.filter((i: any) => i.mimeType !== 'application/vnd.google-apps.folder');
+            
+            // Separate folders for recursion, and exclude Shortcuts to prevent circular loops or errors
+            const files = items.filter((i: any) => 
+                i.mimeType !== 'application/vnd.google-apps.folder' && 
+                i.mimeType !== 'application/vnd.google-apps.shortcut'
+            );
             const folders = items.filter((i: any) => i.mimeType === 'application/vnd.google-apps.folder');
             
             allFiles = allFiles.concat(files);
@@ -277,9 +285,7 @@ export const googleDriveService = {
              const res = await gapi.client.drive.files.export({ fileId, mimeType: 'text/csv' });
              return res.body;
         }
-        // If it's just a text/csv file or Excel, try to fetch media directly.
-        // Note: For real Excel binaries, we ideally need server-side conversion or a library.
-        // Here we attempt basic download.
+        // If it's Excel or CSV uploaded as blob
     }
 
     if (mimeType.includes('document')) {

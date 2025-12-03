@@ -84,6 +84,28 @@ export const apiService = {
 
     let performFullSync = !client.drive_sync_token || forceFullResync;
 
+    const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
+        if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'sheet';
+        if (mimeType.startsWith('image/')) return 'image';
+        return 'pdf'; 
+    };
+    
+    // Whitelist of supported file types for processing
+    // We filter here to ensure we don't try to download 1GB videos or binaries
+    const isSupported = (mime: string) => {
+        const supported = [
+            'application/pdf',
+            'application/vnd.google-apps.document',
+            'application/vnd.google-apps.spreadsheet',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
+            'application/vnd.ms-excel',
+            'text/',
+            'image/'
+        ];
+        return supported.some(t => mime.includes(t));
+    };
+
     // --- STRATEGY B: INCREMENTAL SYNC (Try first if we have a token) ---
     if (!performFullSync) {
         try {
@@ -104,14 +126,7 @@ export const apiService = {
                     }
 
                     const file = change.file;
-                    if (file && 
-                       (file.mimeType.includes('pdf') || file.mimeType.includes('spreadsheet') || file.mimeType.includes('image') || file.mimeType.includes('document') || file.mimeType.includes('csv') || file.mimeType.includes('excel'))
-                    ) {
-                         const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-                            if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'sheet';
-                            if (mimeType.startsWith('image/')) return 'image';
-                            return 'pdf'; 
-                        };
+                    if (file && isSupported(file.mimeType)) {
                         filesToUpdate.push({
                             id: file.id,
                             name: file.name,
@@ -203,20 +218,16 @@ export const apiService = {
         // 1. Get a baseline token for FUTURE changes, but DO NOT save it yet.
         const startPageToken = await googleDriveService.getStartPageToken();
 
-        const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-            if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'sheet';
-            if (mimeType.startsWith('image/')) return 'image';
-            return 'pdf'; 
-        };
-
-        const filesToProcess = driveFilesMeta.map(f => ({ 
-            id: f.id, 
-            name: f.name, 
-            mimeType: f.mimeType, 
-            type: getFileType(f.mimeType), 
-            source: 'GOOGLE_DRIVE' as const,
-            source_modified_at: f.modifiedTime,
-        }));
+        const filesToProcess = driveFilesMeta
+            .filter(f => isSupported(f.mimeType)) // Only supported types
+            .map(f => ({ 
+                id: f.id, 
+                name: f.name, 
+                mimeType: f.mimeType, 
+                type: getFileType(f.mimeType), 
+                source: 'GOOGLE_DRIVE' as const,
+                source_modified_at: f.modifiedTime,
+            }));
         
         // Clean up deletions based on this full list
         const existingFilesMap = new Map(client.synced_files.map(f => [f.source_item_id, f]));
