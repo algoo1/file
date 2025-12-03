@@ -108,7 +108,7 @@ export const apiService = {
                        (file.mimeType.includes('pdf') || file.mimeType.includes('spreadsheet') || file.mimeType.includes('image') || file.mimeType.includes('document'))
                     ) {
                          const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-                            if (mimeType.includes('spreadsheet')) return 'sheet';
+                            if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'sheet';
                             if (mimeType.startsWith('image/')) return 'image';
                             return 'pdf'; 
                         };
@@ -186,12 +186,12 @@ export const apiService = {
         console.log("Starting Full Sync...");
         const driveFilesMeta = await googleDriveService.getListOfFiles(client.google_drive_folder_url!);
         
-        // 1. Get a baseline token for FUTURE changes
+        // 1. Get a baseline token for FUTURE changes, but DO NOT save it yet.
+        // We only save it if we successfully process the files.
         const startPageToken = await googleDriveService.getStartPageToken();
-        await databaseService.updateClient(clientId, { drive_sync_token: startPageToken });
 
         const getFileType = (mimeType: string): 'pdf' | 'sheet' | 'image' => {
-            if (mimeType.includes('spreadsheet')) return 'sheet';
+            if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'sheet';
             if (mimeType.startsWith('image/')) return 'image';
             return 'pdf'; 
         };
@@ -214,9 +214,14 @@ export const apiService = {
         }
 
         const reallyNeedProcessing = filesToProcess.filter(f => {
+             // If forcing, ignore status and re-do everything
+             if (forceFullResync) return true;
+
              const existing = existingFilesMap.get(f.id);
              return !existing || existing.status === 'FAILED';
         });
+        
+        console.log(`Processing ${reallyNeedProcessing.length} files...`);
 
         for (const fileMeta of reallyNeedProcessing) {
             try {
@@ -230,7 +235,11 @@ export const apiService = {
                 const fileData = { ...fileMeta, content };
                 const processed = await fileSearchService.indexSingleFile(client, fileData, settings.file_search_service_api_key);
                 
+                // Get existing DB ID to update record instead of creating duplicate
+                const existing = existingFilesMap.get(fileMeta.id);
+
                 await databaseService.updateClientFiles(clientId, [{
+                    id: existing?.id,
                     client_id: clientId,
                     source_item_id: processed.id,
                     name: processed.name,
@@ -242,7 +251,7 @@ export const apiService = {
                     source: processed.source,
                     last_synced_at: new Date().toISOString(),
                     source_modified_at: processed.source_modified_at,
-                    created_at: new Date().toISOString(),
+                    created_at: existing?.created_at || new Date().toISOString(),
                 }]);
                  onProgress({ type: 'FILE_UPDATE', update: { source_item_id: fileMeta.id, status: 'COMPLETED' }});
 
@@ -253,6 +262,12 @@ export const apiService = {
                 }]);
             }
         }
+        
+        // CRITICAL: Only save the token if we made it to the end.
+        // If the loop above throws or crashes, this line is never reached.
+        // This ensures the next sync starts from scratch (Full Sync) rather than skipping files.
+        await databaseService.updateClient(clientId, { drive_sync_token: startPageToken });
+        console.log("Full sync complete. Token saved.");
     } 
     
     const updatedClient = await databaseService.getClientById(clientId);
