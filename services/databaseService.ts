@@ -14,7 +14,6 @@ export const databaseService = {
     // Auth & Access Control
     validateInviteCode: async (code: string): Promise<boolean> => {
         // We use a Remote Procedure Call (RPC) to check the code securely on the server.
-        // This function should check the 'access_codes' table and mark the code as used.
         const { data, error } = await supabase
             .rpc('check_invite_code', { lookup_code: code });
         
@@ -33,7 +32,7 @@ export const databaseService = {
     getSettings: async (): Promise<SystemSettings> => {
         const userId = await getCurrentUserId();
 
-        // Fetch settings specifically for THIS user
+        // 1. Try to fetch settings
         const { data, error } = await supabase
             .from('settings')
             .select('*')
@@ -41,21 +40,26 @@ export const databaseService = {
             .single();
 
         if (error) {
-            // If no settings exist for this user, create them.
+            // If settings don't exist (Trigger might have failed or didn't run), create them manually.
             if (error.code === 'PGRST116') {
-                 console.log("No settings found for user, creating default entry.");
+                 console.log("No settings found for user (Trigger may have delayed), creating default entry.");
                  const { data: newData, error: newError } = await supabase
                     .from('settings')
                     .insert({ 
                         user_id: userId, 
-                        // Random ID is generally fine if ID is not serial, but usually Supabase handles IDs.
-                        // We rely on Supabase to generate the ID or use the user_id as a reference.
                         file_search_service_api_key: '',
                         is_google_drive_connected: false
                     })
                     .select()
                     .single();
-                if (newError) throw newError;
+                if (newError) {
+                    // If insert fails (maybe uniqueness constraint because trigger actually ran parallel), try fetch again
+                    if (newError.code === '23505') { 
+                        const { data: retryData } = await supabase.from('settings').select('*').eq('user_id', userId).single();
+                        if (retryData) return retryData;
+                    }
+                    throw newError;
+                }
                 return newData;
             }
             throw error;
@@ -66,7 +70,6 @@ export const databaseService = {
     saveSettings: async (newSettings: Partial<Omit<SystemSettings, 'id'>>): Promise<SystemSettings> => {
         const userId = await getCurrentUserId();
         
-        // Update settings where user_id matches
         const { data, error } = await supabase
             .from('settings')
             .update({ ...newSettings, updated_at: new Date().toISOString() })
@@ -79,8 +82,6 @@ export const databaseService = {
 
     // Client Management with Relations
     getClients: async (): Promise<Client[]> => {
-        // Supabase RLS policies (if set up) will automatically filter by user,
-        // but adding .eq('user_id', userId) is good practice for explicit safety.
         const userId = await getCurrentUserId();
 
         // 1. Fetch Clients

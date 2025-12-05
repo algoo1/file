@@ -27,10 +27,9 @@ const LoginPage: React.FC = () => {
         }
         
         // 2. Check Code against Database
-        // This step verifies the code exists and hasn't been used.
         const isValid = await databaseService.validateInviteCode(accessCode.trim());
         if (!isValid) {
-            throw new Error("Access Code is invalid or has already been used.");
+            throw new Error("Access Code is invalid or has already been used. Please contact support.");
         }
 
         // 3. Create Account
@@ -47,11 +46,12 @@ const LoginPage: React.FC = () => {
             setAccessCode('');
         }
       } else {
-        // Sign In (No code required, code check was done at sign up)
+        // Sign In
         const { error } = await authService.signIn(email, password);
         if (error) {
+            console.error("Login Error:", error);
             if (error.message.includes("Invalid login credentials")) {
-                throw new Error("Incorrect email or password.");
+                throw new Error("Incorrect email or password. If you just signed up, please check your email for a confirmation link.");
             }
             throw error;
         }
@@ -128,10 +128,10 @@ const LoginPage: React.FC = () => {
                   value={accessCode}
                   onChange={(e) => setAccessCode(e.target.value)}
                   className="w-full bg-gray-700 text-white rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-blue-500/50"
-                  placeholder="Enter your invite code"
+                  placeholder="Enter your invite code (e.g., kkkok)"
                 />
                 <p className="text-xs text-gray-400 mt-2">
-                    This code is required to create your account. It will be verified against the database.
+                    This code is required to create your account.
                 </p>
              </div>
           )}
