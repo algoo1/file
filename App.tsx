@@ -304,7 +304,13 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-white p-4 text-center">
           <XCircleIcon className="w-16 h-16 text-red-500 mb-4" />
           <h2 className="text-xl font-bold">System Error</h2>
-          <p className="text-gray-400 mt-2">{initError}</p>
+          <p className="text-gray-400 mt-2 mb-6">{initError}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-md transition-colors"
+          >
+            Retry Connection
+          </button>
       </div>
   );
 

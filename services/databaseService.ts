@@ -68,28 +68,42 @@ export const databaseService = {
         if (clientsError) throw clientsError;
         if (!clients || clients.length === 0) return [];
 
-        // 2. Fetch related data manually to avoid PGRST200 (missing Foreign Key metadata)
         const clientIds = clients.map(c => c.id);
         
-        const { data: files, error: filesError } = await supabase
-            .from('synced_files')
-            .select('*')
-            .in('client_id', clientIds);
+        // 2. Fetch related data SAFELY
+        // If the DB schema is broken (missing columns), these might fail.
+        // We catch the error so the main UI still loads the clients.
+        let files: SyncedFile[] = [];
+        try {
+            const { data, error } = await supabase
+                .from('synced_files')
+                .select('*')
+                .in('client_id', clientIds);
             
-        if (filesError) throw filesError;
+            if (error) throw error;
+            files = data as SyncedFile[];
+        } catch (e) {
+            console.warn("Soft Error: Could not fetch synced_files. DB Schema might be incomplete.", e);
+        }
 
-        const { data: tags, error: tagsError } = await supabase
-            .from('tags')
-            .select('*')
-            .in('client_id', clientIds);
+        let tags: Tag[] = [];
+        try {
+            const { data, error } = await supabase
+                .from('tags')
+                .select('*')
+                .in('client_id', clientIds);
             
-        if (tagsError) throw tagsError;
+            if (error) throw error;
+            tags = data as Tag[];
+        } catch (e) {
+            console.warn("Soft Error: Could not fetch tags.", e);
+        }
 
         // 3. Merge data locally
         return clients.map(client => ({
             ...client,
-            synced_files: (files || []).filter(f => f.client_id === client.id),
-            tags: (tags || []).filter(t => t.client_id === client.id)
+            synced_files: files.filter(f => f.client_id === client.id),
+            tags: tags.filter(t => t.client_id === client.id)
         }));
     },
     
@@ -107,24 +121,34 @@ export const databaseService = {
         }
 
         // 2. Fetch related data manually
-        const { data: files, error: filesError } = await supabase
-            .from('synced_files')
-            .select('*')
-            .eq('client_id', id);
+        let files: SyncedFile[] = [];
+        try {
+             const { data, error } = await supabase
+                .from('synced_files')
+                .select('*')
+                .eq('client_id', id);
+             if (error) throw error;
+             files = data as SyncedFile[];
+        } catch (e) {
+             console.warn("Soft Error: Could not fetch client files.", e);
+        }
 
-        if (filesError) throw filesError;
-
-        const { data: tags, error: tagsError } = await supabase
-            .from('tags')
-            .select('*')
-            .eq('client_id', id);
-
-        if (tagsError) throw tagsError;
+        let tags: Tag[] = [];
+        try {
+            const { data, error } = await supabase
+                .from('tags')
+                .select('*')
+                .eq('client_id', id);
+            if (error) throw error;
+            tags = data as Tag[];
+        } catch (e) {
+            console.warn("Soft Error: Could not fetch client tags.", e);
+        }
 
         return {
             ...client,
-            synced_files: files || [],
-            tags: tags || []
+            synced_files: files,
+            tags: tags
         } as Client;
     },
 
